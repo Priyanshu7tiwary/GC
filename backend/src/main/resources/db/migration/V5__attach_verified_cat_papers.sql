@@ -1,0 +1,59 @@
+-- Attach locally bundled official CAT question-paper PDFs to the existing PYQ mock records.
+ALTER TABLE mocks ADD COLUMN paper_asset_path TEXT;
+ALTER TABLE mocks ADD COLUMN paper_source_url TEXT;
+ALTER TABLE mocks ADD COLUMN paper_source_status VARCHAR(40);
+
+-- These two existing catalogue entries refer to 2016, for which no official public CAT paper was released.
+UPDATE mocks SET paper_source_status = 'OFFICIAL_PAPER_NOT_PUBLIC' WHERE exam_year = 2016;
+
+-- CAT 2017–2025 papers: PDF copies labeled as official and headed with the CAT/IIM paper title.
+UPDATE mocks SET paper_asset_path = '/cat-papers/2017/CAT_2017_slot_1_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2017/1792755939_CAT-2017-Nov-26-Slot-1-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2017-1';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2017/CAT_2017_slot_2_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2017/1792755940_CAT-2017-Nov-26-Slot-2-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2017-2';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2018/CAT_2018_slot_1_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2018/1792755939_CAT-2018-Nov-25-Slot-1-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2018-1';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2018/CAT_2018_slot_2_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2018/1792755939_CAT-2018-Nov-25-Slot-2-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2018-2';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2019/CAT_2019_slot_1_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2019/1792755938_CAT-2019-Nov-24-Slot-1-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2019-1';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2019/CAT_2019_slot_2_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2019/1792755938_CAT-2019-Nov-24-Slot-2-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2019-2';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2020/CAT_2020_slot_1_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2020/1792755937_CAT-2020-Nov-29-Slot-1-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2020-1';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2020/CAT_2020_slot_2_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2020/1792755937_CAT-2020-Nov-29-Slot-2-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2020-2';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2020/CAT_2020_slot_3_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2020/1792755938_CAT-2020-Nov-29-Slot-3-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2020-3';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2021/CAT_2021_slot_1_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2021/1792755936_CAT-2021-Nov-28-Slot-1-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2021-1';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2021/CAT_2021_slot_2_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2021/1792755937_CAT-2021-Nov-28-Slot-2-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2021-2';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2021/CAT_2021_slot_3_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2021/1792755937_CAT-2021-Nov-28-Slot-3-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2021-3';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2022/CAT_2022_slot_1_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2022/1792755936_CAT-2022-Nov-27-Slot-1-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2022-1';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2022/CAT_2022_slot_2_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2022/1792755936_CAT-2022-Nov-27-Slot-2-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2022-2';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2022/CAT_2022_slot_3_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2022/1792755936_CAT-2022-Nov-27-Slot-3-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2022-3';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2023/CAT_2023_slot_1_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2023/1792755935_CAT-2023-Nov-26-Slot-1-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2023-1';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2023/CAT_2023_slot_2_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2023/1792755935_CAT-2023-Nov-26-Slot-2-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2023-2';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2023/CAT_2023_slot_3_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2023/1792755935_CAT-2023-Nov-26-Slot-3-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2023-3';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2024/CAT_2024_slot_1_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2024/1792755933_CAT-2024-Nov-24-Slot-1-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2024-1';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2024/CAT_2024_slot_2_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2024/1792755934_CAT-2024-Nov-24-Slot-2-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2024-2';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2024/CAT_2024_slot_3_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2024/1792755934_CAT-2024-Nov-24-Slot-3-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2024-3';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2025/CAT_2025_slot_1_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2025/1792755933_CAT-2025-Nov-30-Slot-1-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2025-1';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2025/CAT_2025_slot_2_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2025/1792755933_CAT-2025-Nov-30-Slot-2-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2025-2';
+UPDATE mocks SET paper_asset_path = '/cat-papers/2025/CAT_2025_slot_3_official.pdf', paper_source_url = 'https://image-static.collegedunia.com/public/questions/cat/2025/1792755933_CAT-2025-Nov-30-Slot-3-Official-Question-Paper-PDF.pdf', paper_source_status = 'OFFICIAL_PAPER' WHERE id = 'pyq-2025-3';
+
+-- Track official-source coverage independently of the playable mock catalogue.
+CREATE TABLE cat_paper_archive_years (
+    exam_year INTEGER PRIMARY KEY,
+    official_pdf_slots INTEGER NOT NULL,
+    source_status VARCHAR(40) NOT NULL,
+    source_page_url TEXT NOT NULL,
+    note TEXT NOT NULL
+ );
+
+INSERT INTO cat_paper_archive_years (exam_year, official_pdf_slots, source_status, source_page_url, note) VALUES
+(2011, 0, 'OFFICIAL_PAPER_NOT_PUBLIC', 'https://bodheeprep.com/cat-question-paper-previous-years-pdf', 'No official CAT question paper was publicly released for this year; third-party copies are memory-based/reconstructed and are not imported as verified papers.'),
+(2012, 0, 'OFFICIAL_PAPER_NOT_PUBLIC', 'https://bodheeprep.com/cat-question-paper-previous-years-pdf', 'No official CAT question paper was publicly released for this year; third-party copies are memory-based/reconstructed and are not imported as verified papers.'),
+(2013, 0, 'OFFICIAL_PAPER_NOT_PUBLIC', 'https://bodheeprep.com/cat-question-paper-previous-years-pdf', 'No official CAT question paper was publicly released for this year; third-party copies are memory-based/reconstructed and are not imported as verified papers.'),
+(2014, 0, 'OFFICIAL_PAPER_NOT_PUBLIC', 'https://bodheeprep.com/cat-question-paper-previous-years-pdf', 'No official CAT question paper was publicly released for this year; third-party copies are memory-based/reconstructed and are not imported as verified papers.'),
+(2015, 0, 'OFFICIAL_PAPER_NOT_PUBLIC', 'https://bodheeprep.com/cat-question-paper-previous-years-pdf', 'No official CAT question paper was publicly released for this year; third-party copies are memory-based/reconstructed and are not imported as verified papers.'),
+(2016, 0, 'OFFICIAL_PAPER_NOT_PUBLIC', 'https://bodheeprep.com/cat-question-paper-previous-years-pdf', 'No official CAT question paper was publicly released for this year; third-party copies are memory-based/reconstructed and are not imported as verified papers.'),
+(2017, 2, 'OFFICIAL_PAPER_IMPORTED', 'https://collegedunia.com/exams/cat/question-paper-2017', 'Official question paper PDFs hosted on Collegedunia and labeled as official; bundled locally under frontend/public/cat-papers/2017.'),
+(2018, 2, 'OFFICIAL_PAPER_IMPORTED', 'https://collegedunia.com/exams/cat/question-paper-2018', 'Official question paper PDFs hosted on Collegedunia and labeled as official; bundled locally under frontend/public/cat-papers/2018.'),
+(2019, 2, 'OFFICIAL_PAPER_IMPORTED', 'https://collegedunia.com/exams/cat/question-paper-2019', 'Official question paper PDFs hosted on Collegedunia and labeled as official; bundled locally under frontend/public/cat-papers/2019.'),
+(2020, 3, 'OFFICIAL_PAPER_IMPORTED', 'https://collegedunia.com/exams/cat/question-paper-2020', 'Official question paper PDFs hosted on Collegedunia and labeled as official; bundled locally under frontend/public/cat-papers/2020.'),
+(2021, 3, 'OFFICIAL_PAPER_IMPORTED', 'https://collegedunia.com/exams/cat/question-paper-2021', 'Official question paper PDFs hosted on Collegedunia and labeled as official; bundled locally under frontend/public/cat-papers/2021.'),
+(2022, 3, 'OFFICIAL_PAPER_IMPORTED', 'https://collegedunia.com/exams/cat/question-paper-2022', 'Official question paper PDFs hosted on Collegedunia and labeled as official; bundled locally under frontend/public/cat-papers/2022.'),
+(2023, 3, 'OFFICIAL_PAPER_IMPORTED', 'https://collegedunia.com/exams/cat/question-paper-2023', 'Official question paper PDFs hosted on Collegedunia and labeled as official; bundled locally under frontend/public/cat-papers/2023.'),
+(2024, 3, 'OFFICIAL_PAPER_IMPORTED', 'https://collegedunia.com/exams/cat/question-paper-2024', 'Official question paper PDFs hosted on Collegedunia and labeled as official; bundled locally under frontend/public/cat-papers/2024.'),
+(2025, 3, 'OFFICIAL_PAPER_IMPORTED', 'https://collegedunia.com/exams/cat/question-paper-2025', 'Official question paper PDFs hosted on Collegedunia and labeled as official; bundled locally under frontend/public/cat-papers/2025.');

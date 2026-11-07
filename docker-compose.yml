@@ -1,0 +1,75 @@
+name: catalyst
+
+# Secrets come from .env (see .env.example). Only the app on port 3000 is reachable from other machines;
+# the database, API and Mailpit listen on 127.0.0.1 only.
+
+x-hardening: &hardening
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  db:
+    <<: *hardening
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-catalyst}
+      POSTGRES_USER: ${POSTGRES_USER:-catalyst}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Catches outgoing email locally so you can read one-time codes at http://localhost:8025.
+  mailpit:
+    <<: *hardening
+    image: axllent/mailpit:v1.20.0
+    ports:
+      - "127.0.0.1:8025:8025"
+    cap_drop: [ALL]
+
+  backend:
+    <<: *hardening
+    build: ./backend
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-catalyst}
+      DB_USER: ${POSTGRES_USER:-catalyst}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env (openssl rand -base64 48)}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_AUTH: ${SMTP_AUTH:-false}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-false}
+      MAIL_FROM: ${MAIL_FROM:-CATalyst <no-reply@catalyst.local>}
+      API_DOCS_ENABLED: ${API_DOCS_ENABLED:-false}
+    ports:
+      - "127.0.0.1:8080:8080"   # for the Vite dev server's proxy; the public entry point is the frontend
+    cap_drop: [ALL]
+    depends_on:
+      db:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+
+  frontend:
+    <<: *hardening
+    build: ./frontend
+    ports:
+      - "3000:8080"
+    cap_drop: [ALL]
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  pgdata:

@@ -1,0 +1,24 @@
+# dependencies & build output
+node_modules/
+dist/
+target/
+.vite/
+
+# secrets and local config
+.env
+.env.*
+!.env.example
+.aws/
+.codex/
+.agents/
+.claude/
+
+# official CAT papers (personal copies, not for redistribution)
+papers/
+*.pdf
+
+# editor / OS noise
+.idea/
+.vscode/
+*.iml
+.DS_Store
