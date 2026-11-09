@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useStore, revisionBuckets, today, daysBetween } from '../lib/store.jsx';
 import { SECTIONS, ALL_TOPICS } from '../data/syllabus.js';
 import { findMock } from '../data/mocks.js';
-import { usePapers } from '../lib/catalog.js';
+import { useCatalog, usePapers } from '../lib/catalog.js';
 import { LineChart, SegBar } from '../components/Charts.jsx';
 import {
   SECTION_KEYS, sectionStats, isFullLength, movingAverage, fmtDate, pct, mins,
@@ -47,8 +47,9 @@ function Empty({ children }) {
 }
 
 export default function Analytics() {
-  const { attempts, revisions, revisionLog, customMocks, targetPercentile, examDate, updateSettings, resetDemo } = useStore();
+  const { attempts, revisions, revisionLog, customMocks, targetPercentile, examDate, updateSettings } = useStore();
   const { papers } = usePapers();
+  const { list: sectionals } = useCatalog('SECTIONAL');
   const [range, setRange] = useState('10');
   const [section, setSection] = useState('all');
   const [scoreMode, setScoreMode] = useState('raw');
@@ -88,7 +89,7 @@ export default function Analytics() {
     : sectionTrend[section].map((s, i) => ({ label: `${i + 1}`, tip: `${s.a.title} · ${fmtDate(s.a.date)}`, [section]: scoreMode === 'raw' ? s.score : Math.round((s.score / s.max) * 100) }));
 
   /* ---------- 3. topic review ---------- */
-  const withQuestions = inRange.filter((a) => a.answers && a.questionIds?.length);
+  const withQuestions = inRange;
   const loaded = useAttemptQuestions(withQuestions);
   const topics = topicReview(withQuestions, loaded.byAttempt);
   const shownTopics = topics.filter((t) => section === 'all' || t.section === section);
@@ -117,7 +118,7 @@ export default function Analytics() {
     requestAnimationFrame(() => document.getElementById(`topic-${encodeURIComponent(key)}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
   };
 
-  const sectionLimit = (a) => (findMock(a.mockId, customMocks) || papers?.find((m) => m.id === a.mockId))?.sectionMinutes ?? null;
+  const sectionLimit = (a) => (findMock(a.mockId, customMocks) || papers?.find((m) => m.id === a.mockId) || sectionals?.find((m) => m.id === a.mockId))?.sectionMinutes ?? null;
 
   return (
     <div className="page">
@@ -412,7 +413,6 @@ export default function Analytics() {
               {[90, 95, 97, 98, 99, 99.5].map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
           </label>
-          <button className="btn" onClick={() => { if (confirm('Erase your coverage, attempts and activity on this device and start again from zero?')) resetDemo(); }}>Reset my progress</button>
         </div>
       </div>
     </div>

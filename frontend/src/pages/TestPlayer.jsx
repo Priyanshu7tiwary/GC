@@ -2,11 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { SECTION_MINUTES } from '../data/mocks.js';
 import { useMock } from '../lib/catalog.js';
-import { QUESTIONS } from '../data/questions.js';
 import { SECTIONS } from '../data/syllabus.js';
 import { useStore } from '../lib/store.jsx';
 import { isScored, loadAnswerKeys, toKey } from '../lib/pyq.js';
-import { scoreQuestion, tally } from '../lib/scoring.js';
+import { scoreQuestion } from '../lib/scoring.js';
 import { AdminModeSwitch, useAdminMode } from '../lib/adminMode.jsx';
 import AnswerKeyEditor from '../components/AnswerKeyEditor.jsx';
 import RichText from '../components/RichText.jsx';
@@ -82,8 +81,7 @@ function Player({ mock }) {
   const onKeySaved = (id, answer) => setKeys((k) => ({ ...k, [id]: { answer, corrected: true } }));
 
   const bank = useMemo(() => Object.fromEntries(sections.map((s) => {
-    const pool = isServer ? served || []
-      : mock.questionIds ? mock.questionIds.map((id) => QUESTIONS.find((q) => q.id === id)).filter(Boolean) : QUESTIONS;
+    const pool = served || [];
     return [s, pool.filter((q) => q.section === s)];
   })), [mock, sections, isServer, served]);
   const [secIdx, setSecIdx] = useState(0);
@@ -116,30 +114,16 @@ function Player({ mock }) {
     return () => clearInterval(t);
   }, [secId, ready]);
 
-  const finishOnServer = async (finalAnswers) => {
+  // Every mock is scored by the server; the result page then loads the solutions from it.
+  const finish = async (finalAnswers) => {
     setSubmit({ busy: true, error: null, answers: finalAnswers });
     try {
-      const scored = await submitServerAttempt(mock, sections, finalAnswers, timeUsed.current);
-      const id = `a-${Date.now()}`;
-      addAttempt({
-        id, mockId: mock.id, title, date: Date.now(), ...scored, answers: finalAnswers,
-        timeSpent: Object.values(timeUsed.current).reduce((a, b) => a + b, 0),
-      });
-      nav(`/mocks/result/${id}`, { replace: true });
+      const attempt = await submitServerAttempt(mock, sections, finalAnswers, timeUsed.current);
+      addAttempt({ ...attempt, title });
+      nav(`/mocks/result/${attempt.id}`, { replace: true });
     } catch (e) {
       setSubmit({ busy: false, error: e.message || 'Could not submit the test.', answers: finalAnswers });
     }
-  };
-
-  const finish = (finalAnswers) => {
-    if (isServer) { finishOnServer(finalAnswers); return; }
-    const { sections: results, score, max, percentile } = tally(bank, finalAnswers, timeUsed.current, sections.length === 3);
-    const id = `a-${Date.now()}`;
-    addAttempt({
-      id, mockId: mock.id, title, date: Date.now(), score, max, percentile,
-      sections: results, answers: finalAnswers, questionIds: sections.flatMap((s) => bank[s].map((qq) => qq.id)), timeSpent: Object.values(timeUsed.current).reduce((a, b) => a + b, 0),
-    });
-    nav(`/mocks/result/${id}`, { replace: true });
   };
 
   const nextSection = (finalAnswers = answers) => {
@@ -164,7 +148,7 @@ function Player({ mock }) {
           {submit.error ? (
             <>
               <p className="muted">Your answers are safe in this tab, but they couldn’t be submitted: {submit.error}</p>
-              <button className="btn primary" disabled={submit.busy} onClick={() => finishOnServer(submit.answers)}>Try again</button>
+              <button className="btn primary" disabled={submit.busy} onClick={() => finish(submit.answers)}>Try again</button>
             </>
           ) : <p className="muted" style={{ marginBottom: 0 }}>Scoring your test…</p>}
         </div>

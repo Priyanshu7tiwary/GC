@@ -42,6 +42,7 @@ class AiSuggestionServiceTest {
     final AtomicReference<String> sentBody = new AtomicReference<>();
     final AtomicReference<String> sentAuth = new AtomicReference<>();
     final AtomicInteger status = new AtomicInteger(200);
+    final AtomicInteger fallbackStatus = new AtomicInteger(200);
     final AtomicInteger calls = new AtomicInteger();
     AiSuggestionService service;
     final java.util.List<AiSuggestionRun> saved = new java.util.ArrayList<>();
@@ -71,9 +72,11 @@ class AiSuggestionServiceTest {
             sentBody.set(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             sentAuth.set(ex.getRequestHeaders().getFirst("Authorization"));
             String content = new ObjectMapper().writeValueAsString(Map.of("choices", List.of(Map.of("message", Map.of("content", reply.get())))));
-            byte[] b = (status.get() == 200 ? content : "{\"error\":\"nope\"}").getBytes(StandardCharsets.UTF_8);
+            int st = sentBody.get().contains("\"fallback-model\"") ? fallbackStatus.get() : status.get();
+            byte[] b = (st == 200 ? content : "{\"error\":\"nope\"}").getBytes(StandardCharsets.UTF_8);
             ex.getResponseHeaders().add("Content-Type", "application/json");
-            ex.sendResponseHeaders(status.get(), b.length);
+            ex.getResponseHeaders().add("Retry-After", "0");
+            ex.sendResponseHeaders(st, b.length);
             ex.getResponseBody().write(b);
             ex.close();
         });
@@ -98,7 +101,7 @@ class AiSuggestionServiceTest {
             return saved.stream().filter(r -> r.isCounted() && r.getCreatedAt().isAfter(since)).toList();
         });
         when(runs.findFirstByUserIdOrderByCreatedAtDesc(any())).thenAnswer(i -> saved.isEmpty() ? java.util.Optional.empty() : java.util.Optional.of(saved.get(saved.size() - 1)));
-        service = new AiSuggestionService(topics, mocks, practice, runs, estimator(), new ObjectMapper().findAndRegisterModules(), clock, 3, "secret-key", "http://127.0.0.1:" + server.getAddress().getPort(), "test-model");
+        service = new AiSuggestionService(topics, mocks, practice, runs, estimator(), new ObjectMapper().findAndRegisterModules(), clock, 3, "secret-key", "http://127.0.0.1:" + server.getAddress().getPort(), "test-model", "fallback-model");
     }
 
     static com.catalyst.attempt.scoring.PercentileEstimator estimator() {
@@ -177,6 +180,24 @@ class AiSuggestionServiceTest {
     }
 
     @Test
+    void aRateLimitedModelIsRetriedOnceThenTheFallbackModelAnswers() {
+        status.set(429);
+        reply.set(OK);
+        var out = service.suggest(USER, request(20)).plan();
+        assertThat(calls.get()).isEqualTo(3);                 // main, main again after Retry-After, then fallback
+        assertThat(out.model()).isEqualTo("fallback-model");   // the plan says which model wrote it
+    }
+
+    @Test
+    void whenEveryModelIsRateLimitedTheLearnerIsToldItIsBusyAndKeepsTheirAllowance() {
+        status.set(429);
+        fallbackStatus.set(429);
+        reply.set(OK);
+        assertThatThrownBy(() -> service.suggest(USER, request(21))).isInstanceOf(ServiceUnavailableException.class).hasMessageContaining("busy");
+        assertThat(service.state(USER).quota().remaining()).isEqualTo(3);
+    }
+
+    @Test
     void acceptsAnAnswerWrappedInACodeFence() {
         reply.set("```json\n{\"summary\":\"s\",\"topics\":[{\"topicId\":\"qa::arithmetic::percentages\",\"priority\":\"high\",\"reason\":\"r\"}],\"tests\":[]}\n```");
         assertThat(service.suggest(USER, request(1)).plan().topics()).hasSize(1);
@@ -240,7 +261,7 @@ class AiSuggestionServiceTest {
     @Test
     void withoutAKeyItIsUnavailableAndMakesNoCall() {
         var off = new AiSuggestionService(mock(TopicRepository.class), mock(MockCatalogService.class), mock(PracticeService.class), mock(AiSuggestionRunRepository.class), estimator(), new ObjectMapper(),
-                Clock.systemUTC(), 3, "", "http://127.0.0.1:" + server.getAddress().getPort(), "m");
+                Clock.systemUTC(), 3, "", "http://127.0.0.1:" + server.getAddress().getPort(), "m", "");
         assertThat(off.available()).isFalse();
         assertThatThrownBy(() -> off.suggest(USER, request(7))).isInstanceOf(ServiceUnavailableException.class);
         assertThat(calls.get()).isZero();

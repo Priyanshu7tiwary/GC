@@ -56,9 +56,11 @@ docker compose up -d --build
   - the database, API and Mailpit listen on localhost only
   - API docs and actuator endpoints are not exposed through the public site
 
-**Before going public:** serve the site over HTTPS behind a TLS proxy and enable HSTS. Use a real SMTP provider and set `GOOGLE_CLIENT_ID` for your domain. If you run more than one API instance, move the rate limiter to Redis. Progress data (coverage, revisions, attempts) is still kept in each user's browser, separated per account; moving it to the API is the next step.
+**Going public:** see [DEPLOY.md](DEPLOY.md). It runs everything on one server with Docker (`docker-compose.prod.yml`): HTTPS through Caddy with automatic certificates and HSTS, HTTPS-only cookies, real email, and daily database backups. All learner data (coverage, targets, mock attempts, solved questions, revision schedule, study time) is stored on the server, so it is the same on every device. If you ever run more than one API instance, move the rate limiter to Redis.
 
-## Deploy (Vercel + Render)
+## Deploy on Vercel + Render (alternative)
+
+The recommended setup is one Docker server, described in [DEPLOY.md](DEPLOY.md). Vercel + Render also works:
 
 Vercel hosts the static frontend only. The Spring Boot API and Postgres run on Render (`render.yaml`). Vercel proxies `/api/*` to the API (`frontend/vercel.json`), so the browser only ever talks to the Vercel domain and the session cookies stay first-party.
 

@@ -89,7 +89,7 @@ function PracticeCard({ q, index, onChange }) {
 
 export default function TopicPractice() {
   const { topicId } = useParams();
-  const { coverage, setCoverage, refreshPractice, logMinutes } = useStore();
+  const { coverage, setCoverage, refreshPractice, refreshProgress } = useStore();
   const t = ALL_TOPICS.find((x) => x.id === topicId);
   const [filter, setFilter] = useState('all');
   const [data, setData] = useState(null);
@@ -121,7 +121,7 @@ export default function TopicPractice() {
     if (dSolved) {
       // the topic's counter is the number of solved questions, which the server holds
       if (dSolved > 0 && (coverage[topicId]?.status ?? 0) === 0) setCoverage(topicId, { status: 1 });
-      if (dSolved > 0) logMinutes(4); // a solved question counts as about 4 minutes of study
+      if (dSolved > 0) refreshProgress().catch(() => {}); // the server credits about 4 minutes of study per solved question
       refreshPractice();
     }
   };

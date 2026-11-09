@@ -57,13 +57,14 @@ public class AiSuggestionService {
     private final AiSuggestionRunRepository runs;
     private final PercentileEstimator percentiles;
     private final int weeklyLimit;
-    private final String apiKey, baseUrl, model;
+    private final String apiKey, baseUrl, model, fallbackModel;
 
     public AiSuggestionService(TopicRepository topics, MockCatalogService mocks, PracticeService practice, AiSuggestionRunRepository runs, PercentileEstimator percentiles, ObjectMapper json, Clock clock,
                                @Value("${app.suggestion-ai.weekly-limit:3}") int weeklyLimit,
                                @Value("${app.suggestion-ai.api-key:}") String apiKey,
                                @Value("${app.suggestion-ai.base-url:https://api.groq.com/openai/v1}") String baseUrl,
-                               @Value("${app.suggestion-ai.model:openai/gpt-oss-120b}") String model) {
+                               @Value("${app.suggestion-ai.model:openai/gpt-oss-120b}") String model,
+                               @Value("${app.suggestion-ai.fallback-model:openai/gpt-oss-20b}") String fallbackModel) {
         this.topics = topics;
         this.mocks = mocks;
         this.practice = practice;
@@ -75,6 +76,7 @@ public class AiSuggestionService {
         this.apiKey = apiKey == null ? "" : apiKey.trim();
         this.baseUrl = baseUrl.replaceAll("/+$", "");
         this.model = model;
+        this.fallbackModel = fallbackModel == null ? "" : fallbackModel.trim();
     }
 
     public boolean available() {
@@ -144,8 +146,8 @@ public class AiSuggestionService {
         List<MockSummary> catalogue = new ArrayList<>(mocks.list(userId, MockKind.PREVIOUS_YEAR, null, null));
         Map<String, MockSummary> mockById = catalogue.stream().collect(Collectors.toMap(MockSummary::id, m -> m, (a, b) -> a, LinkedHashMap::new));
 
-        String reply = chat(systemPrompt(), userPrompt(req, byId, bank, mockById, attempted));
-        return parse(reply, req, byId, bank, mockById, attempted, now);
+        Reply reply = chat(systemPrompt(), userPrompt(req, byId, bank, mockById, attempted));
+        return parse(reply.content(), reply.model(), req, byId, bank, mockById, attempted, now);
     }
 
     /* ---- prompt ---- */
@@ -240,10 +242,44 @@ public class AiSuggestionService {
 
     /* ---- API call ---- */
 
-    private String chat(String system, String user) {
+    private record Reply(String content, String model) {}
+
+    /**
+     * Asks the provider. Free tiers rate-limit (HTTP 429): the request is retried once after the wait the provider asks
+     * for (at most 8 seconds), then sent to the fallback model, which has its own limit.
+     */
+    private Reply chat(String system, String user) {
+        List<String> models = fallbackModel.isBlank() || fallbackModel.equals(model) ? List.of(model) : List.of(model, fallbackModel);
+        for (String m : models) {
+            for (int attempt = 0; attempt < 2; attempt++) {
+                HttpResponse<String> res = send(m, system, user);
+                if (res.statusCode() == 429) {
+                    if (attempt == 0) { pause(retryAfter(res)); continue; }
+                    log.warn("AI suggestions: {} is rate-limited", m);
+                    break;  // next model
+                }
+                if (res.statusCode() == 401 || res.statusCode() == 403) {
+                    log.error("AI suggestions: the provider rejected the API key (HTTP {})", res.statusCode());
+                    throw new ServiceUnavailableException("The AI service rejected this server's API key.");
+                }
+                if (res.statusCode() / 100 != 2) {
+                    log.warn("AI suggestions: provider returned HTTP {}: {}", res.statusCode(), abbreviate(res.body()));
+                    throw new ServiceUnavailableException("The AI service couldn't answer (HTTP " + res.statusCode() + ").");
+                }
+                try {
+                    return new Reply(json.readTree(res.body()).path("choices").path(0).path("message").path("content").asText(""), m);
+                } catch (Exception e) {
+                    throw new ServiceUnavailableException("The AI's answer couldn't be read. Try again.");
+                }
+            }
+        }
+        throw new ServiceUnavailableException("The AI service is busy right now. Try again in a minute.");
+    }
+
+    private HttpResponse<String> send(String m, String system, String user) {
         try {
             String body = json.writeValueAsString(Map.of(
-                    "model", model,
+                    "model", m,
                     "temperature", 0.3,
                     "response_format", Map.of("type", "json_object"),
                     "messages", List.of(Map.of("role", "system", "content", system), Map.of("role", "user", "content", user))));
@@ -252,19 +288,7 @@ public class AiSuggestionService {
                     .header("Authorization", "Bearer " + apiKey)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body)).build();
-            HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
-            if (res.statusCode() == 429) throw new ServiceUnavailableException("The AI service is busy right now (rate limit). Try again in a minute.");
-            if (res.statusCode() == 401 || res.statusCode() == 403) {
-                log.error("AI suggestions: the provider rejected the API key (HTTP {})", res.statusCode());
-                throw new ServiceUnavailableException("The AI service rejected this server's API key.");
-            }
-            if (res.statusCode() / 100 != 2) {
-                log.warn("AI suggestions: provider returned HTTP {}: {}", res.statusCode(), abbreviate(res.body()));
-                throw new ServiceUnavailableException("The AI service couldn't answer (HTTP " + res.statusCode() + ").");
-            }
-            return json.readTree(res.body()).path("choices").path(0).path("message").path("content").asText("");
-        } catch (ServiceUnavailableException e) {
-            throw e;
+            return http.send(req, HttpResponse.BodyHandlers.ofString());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ServiceUnavailableException("The AI request was interrupted.");
@@ -274,9 +298,28 @@ public class AiSuggestionService {
         }
     }
 
+    /** The provider's requested wait, from Retry-After (seconds), capped at 8 seconds; 2 seconds when not given. */
+    static long retryAfter(HttpResponse<String> res) {
+        try {
+            double sec = Double.parseDouble(res.headers().firstValue("retry-after").orElse("2"));
+            return (long) (Math.max(0, Math.min(8, sec)) * 1000);
+        } catch (NumberFormatException e) {
+            return 2000;
+        }
+    }
+
+    private static void pause(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ServiceUnavailableException("The AI request was interrupted.");
+        }
+    }
+
     /* ---- checking the answer ---- */
 
-    private AiSuggestionResponse parse(String reply, AiSuggestionRequest req, Map<String, Topic> byId, Map<String, PracticeService.TopicCounts> bank,
+    private AiSuggestionResponse parse(String reply, String usedModel, AiSuggestionRequest req, Map<String, Topic> byId, Map<String, PracticeService.TopicCounts> bank,
                                        Map<String, MockSummary> mockById, Set<String> attempted, Instant now) {
         JsonNode root;
         try {
@@ -310,7 +353,7 @@ public class AiSuggestionService {
                     text(n.path("reason").asText("")), "/mocks/start/" + id));
         }
         if (picks.isEmpty() && tests.isEmpty()) throw new ServiceUnavailableException("The AI didn't suggest anything usable. Try again.");
-        return new AiSuggestionResponse(text(root.path("summary").asText("")), likelihood(root.path("likelihood"), req), picks, tests, model, now);
+        return new AiSuggestionResponse(text(root.path("summary").asText("")), likelihood(root.path("likelihood"), req), picks, tests, usedModel, now);
     }
 
     /** The model's estimate, clamped, with the label and (when there is no mock evidence) the confidence set here. */

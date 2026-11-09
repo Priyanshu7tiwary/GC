@@ -81,6 +81,8 @@ app:
     api-key: ${AI_API_KEY:}
     base-url: ${AI_BASE_URL:https://api.groq.com/openai/v1}
     model: ${AI_MODEL:openai/gpt-oss-120b}
+    # used when the main model is rate-limited (each model has its own limit on Groq); empty turns it off
+    fallback-model: ${AI_FALLBACK_MODEL:openai/gpt-oss-20b}
     # AI plans one learner may generate per rolling 7 days
     weekly-limit: ${AI_WEEKLY_LIMIT:3}
   ai:

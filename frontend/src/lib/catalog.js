@@ -2,7 +2,6 @@
 // server (GET /api/mocks, /api/mocks/<id>/paper, POST /api/mocks/<id>/attempts); the browser holds no paper files.
 import { useEffect, useState } from 'react';
 import { api } from './api.js';
-import { findMock as findLocalMock } from '../data/mocks.js';
 
 const KIND = { PREVIOUS_YEAR: 'pyq', SECTIONAL: 'sectional', CUSTOM: 'custom' };
 
@@ -27,36 +26,40 @@ export function fromServer(m) {
   };
 }
 
-let papers = null; // Promise<mock[]> of previous-year papers, loaded once per page load
+const cache = {}; // kind -> Promise<mock[]>, loaded once per page load
 
-export function loadPapers() {
-  if (!papers) {
-    papers = api('/api/mocks?kind=PREVIOUS_YEAR').then((list) => list.map(fromServer));
-    papers.catch(() => { papers = null; }); // allow a retry after a failure
+function load(kind) {
+  if (!cache[kind]) {
+    cache[kind] = api(`/api/mocks?kind=${kind}`).then((list) => list.map(fromServer));
+    cache[kind].catch(() => { delete cache[kind]; }); // allow a retry after a failure
   }
-  return papers;
+  return cache[kind];
 }
+export const loadPapers = () => load('PREVIOUS_YEAR');
 
-/** Previous-year papers from the API: { papers: mock[] | null, error }. papers is null while loading. */
-export function usePapers() {
-  const [state, setState] = useState({ papers: null, error: null });
+/** Mocks of one kind from the API: { list: mock[] | null, error }. list is null while loading. */
+export function useCatalog(kind) {
+  const [state, setState] = useState({ list: null, error: null });
   useEffect(() => {
     let live = true;
-    loadPapers().then((list) => live && setState({ papers: list, error: null }), (error) => live && setState({ papers: null, error }));
+    load(kind).then((list) => live && setState({ list, error: null }), (error) => live && setState({ list: null, error }));
     return () => { live = false; };
-  }, []);
+  }, [kind]);
   return state;
 }
 
-/**
- * One mock by id: { mock, loading, error }. Previous-year papers come from the API; sectional and generated mocks
- * from the app's lists.
- */
+/** Previous-year papers: { papers, error }. */
+export function usePapers() {
+  const { list, error } = useCatalog('PREVIOUS_YEAR');
+  return { papers: list, error };
+}
+
+/** One mock by id: { mock, loading, error }. Papers and sectionals come from the API, generated mocks from the app's list. */
 export function useMock(id, customMocks = []) {
-  const local = findLocalMock(id, customMocks);
-  const isPaper = !local && /^pyq-/.test(id || '');
-  const { papers: list, error } = usePapers();
-  if (local) return { mock: local, loading: false, error: null };
-  if (!isPaper) return { mock: null, loading: false, error: null };
+  const custom = customMocks.find((m) => m.id === id);
+  const kind = /^pyq-/.test(id || '') ? 'PREVIOUS_YEAR' : /^sec-/.test(id || '') ? 'SECTIONAL' : null;
+  const { list, error } = useCatalog(kind || 'PREVIOUS_YEAR');
+  if (custom) return { mock: custom, loading: false, error: null };
+  if (!kind) return { mock: null, loading: false, error: null };
   return { mock: list ? list.find((m) => m.id === id) || null : null, loading: !list && !error, error };
 }

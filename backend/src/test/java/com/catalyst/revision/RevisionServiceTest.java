@@ -70,7 +70,7 @@ class RevisionServiceTest {
         Topic topic = topic();
         when(topics.findById(TOPIC)).thenReturn(Optional.of(topic));
         when(topics.getReferenceById(TOPIC)).thenReturn(topic);
-        service = new RevisionService(items, events, topics, new LadderSpacedRepetitionPolicy(), e -> { }, clock);
+        service = new RevisionService(items, events, topics, new LadderSpacedRepetitionPolicy(), e -> { }, clock, mock(BacklogDayRepository.class));
     }
 
     static Topic topic() throws Exception {

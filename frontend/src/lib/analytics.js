@@ -3,8 +3,7 @@
 // answers and question ids. Question topics come from the question itself (paper JSON, server, or local bank).
 import { useEffect, useState } from 'react';
 import { ALL_TOPICS } from '../data/syllabus.js';
-import { QUESTIONS } from '../data/questions.js';
-import { loadServerSolutions } from './mockGenerator.js';
+import { loadServerAttempt } from './mockGenerator.js';
 import { scoreQuestion } from './scoring.js';
 
 export const SECTION_KEYS = ['VARC', 'DILR', 'QA'];
@@ -51,20 +50,11 @@ export const mins = (s) => (s == null ? '—' : `${Math.floor(s / 60)}m ${String
 
 const solutionCache = new Map();
 
-/** The questions of one attempt (with keys and topics), or null when the attempt has no question-level data. */
+/** The questions of one attempt (with keys, topics and the learner's answer as `response`), from the server. */
 async function questionsFor(a) {
-  if (!a.answers || !a.questionIds?.length) return null;
-  let pool;
-  if (a.serverAttemptId) {
-    if (!solutionCache.has(a.serverAttemptId)) solutionCache.set(a.serverAttemptId, loadServerSolutions(a.serverAttemptId));
-    pool = await solutionCache.get(a.serverAttemptId);
-  } else if (a.mockId?.startsWith('pyq-')) {
-    return null; // a paper attempt from before papers were scored by the server: no question-level data kept
-  } else {
-    pool = QUESTIONS;
-  }
-  const byId = new Map(pool.map((q) => [q.id, q]));
-  return a.questionIds.map((id) => byId.get(id)).filter(Boolean);
+  if (!solutionCache.has(a.id)) solutionCache.set(a.id, loadServerAttempt(a.id));
+  const detail = await solutionCache.get(a.id);
+  return detail.questions.map((q) => ({ ...q, response: detail.answers[q.id] }));
 }
 
 /** Loads question-level data for the given attempts: { byAttempt: {id: question[]}, loading, failed }. */
@@ -103,7 +93,7 @@ export function topicReview(attempts, byAttempt) {
     if (!qs) return;
     const weight = Math.pow(0.8, rank); // a miss in the latest mock counts most
     qs.forEach((q) => {
-      const r = scoreQuestion(q, a.answers[q.id]).result;
+      const r = scoreQuestion(q, q.response).result;
       if (r === 'unscored') return;
       const key = `${q.section}|${q.topic}`;
       if (!rows.has(key)) {

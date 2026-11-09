@@ -78,6 +78,7 @@ Authentication is a session cookie (`catalyst_session`, HttpOnly) set by the sig
 | POST | `/api/revisions/{topicId}/reviews` | `{ rating: HARD \| GOOD \| EASY, requestId }`. Outcome `ADVANCED`, `PRACTICE_NOT_DUE`, `PRACTICE_ALREADY_REVIEWED_TODAY` or `DUPLICATE_REQUEST` |
 | POST | `/api/revisions/{topicId}/pause` | Stop a topic coming due, keeping its stage and history (done automatically when a topic is reopened) |
 | POST | `/api/revisions/{topicId}/reset` | Explicit restart at the first rung, due tomorrow |
+| GET | `/api/revisions/backlog` | `?days=180` Daily overdue / due counts (recorded whenever the board is loaded), for the backlog trend in Analytics |
 | GET | `/api/revisions/{topicId}/history` | Every enrol / review / practice / pause / resume / reset, newest first |
 | GET | `/api/suggestions/ai` | The learner's latest AI plan and weekly allowance `{ available, plan, quota: { limit, used, remaining, nextAvailableAt } }`. Costs no allowance |
 | POST | `/api/suggestions/ai` | Generates a new AI plan from the learner's progress (ids and numbers only) and returns the same shape. 429 once the weekly allowance is used; 503 when no `AI_API_KEY` is set |
@@ -152,4 +153,9 @@ The server is the only authority for revision dates; the browser shows what `/ap
 - **Provider:** set `AI_API_KEY` (and optionally `AI_BASE_URL`, `AI_MODEL`). The default is Groq's free tier serving open-weight models (`openai/gpt-oss-120b`; key from console.groq.com/keys). OpenRouter's free models or a local Ollama (`AI_BASE_URL=http://host.docker.internal:11434/v1`) work too. Without a key the app keeps its rule-based suggestions.
 - **What is sent:** target, days left, recent mock results, topic coverage, overdue-revision ids and weekly study minutes, plus the catalogue of real topics and tests. No name or email.
 - **What comes back is checked:** the model may only pick topic and test ids from the lists it was given. Unknown or repeated ids are dropped, and the links (`/practice/<topicId>`, `/mocks/start/<mockId>`) are built by the server, never taken from the model.
+- **Busy provider:** on HTTP 429 the request is retried once after the provider's `Retry-After` (at most 8 s), then sent to `AI_FALLBACK_MODEL` (default `openai/gpt-oss-20b`), which Groq rate-limits separately. If both are busy the learner is told so and keeps their allowance.
 - **Weekly limit:** each learner may generate 3 plans in any rolling 7 days (`AI_WEEKLY_LIMIT`). Plans are stored in `ai_suggestion_runs`, so the limit survives restarts. A failed call costs nothing. To reset everyone's allowance without losing their plans: `UPDATE ai_suggestion_runs SET counted = false;` (`V16`). When the allowance is used up the latest plan is still shown, with `nextAvailableAt` (when the oldest counted plan turns 7 days old) so the app can show a countdown in days. Opening the panel never uses the allowance; only the Generate button does.
+
+## Sectional mocks
+
+The 24 sectionals (`sec-VARC-1` … `sec-QA-8`) have fixed question sets (`V18`), built by `scripts/build_sectionals.py` from the keyed question bank: whole RC passages and DILR sets only, each sectional leaning on its theme, about 30% TITA in QA, and no question shared by two sectionals of the same section. Re-run the script (see its header) and save the output as a new migration to rebuild them.

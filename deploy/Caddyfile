@@ -1,0 +1,10 @@
+# Public entry point: HTTPS with automatic Let's Encrypt certificates, then the app (nginx in the frontend container).
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	reverse_proxy frontend:8080
+}

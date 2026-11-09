@@ -57,15 +57,17 @@ public class RevisionService {
     private final SpacedRepetitionPolicy policy;
     private final ApplicationEventPublisher events;
     private final Clock clock;
+    private final BacklogDayRepository backlog;
 
     public RevisionService(RevisionItemRepository items, RevisionEventRepository history, TopicRepository topics,
-                           SpacedRepetitionPolicy policy, ApplicationEventPublisher events, Clock clock) {
+                           SpacedRepetitionPolicy policy, ApplicationEventPublisher events, Clock clock, BacklogDayRepository backlog) {
         this.items = items;
         this.history = history;
         this.topics = topics;
         this.policy = policy;
         this.events = events;
         this.clock = clock;
+        this.backlog = backlog;
     }
 
     private LocalDate today() {
@@ -95,6 +97,26 @@ public class RevisionService {
         }).toList();
         List<Integer> intervals = IntStream.rangeClosed(0, policy.retainedStage() + 1).map(policy::intervalDays).boxed().toList();
         return new RevisionBoard(new RevisionBoard.Summary(overdue, due, week, active.size() - overdue - due, retained), intervals, forecast, all);
+    }
+
+    /** Saves today's overdue and due counts for this learner (called when the board is loaded). */
+    @Transactional
+    public void recordBacklog(UUID userId) {
+        LocalDate today = today();
+        List<RevisionItem> active = items.findByUserIdOrderByNextDueOnAsc(userId).stream().filter(i -> !i.isPaused()).toList();
+        int overdue = (int) active.stream().filter(i -> i.getNextDueOn().isBefore(today)).count();
+        int due = (int) active.stream().filter(i -> i.getNextDueOn().equals(today)).count();
+        backlog.upsert(userId, today, overdue, due);
+    }
+
+    public record BacklogDay(LocalDate day, int overdue, int due) {}
+
+    /** The daily backlog snapshots for the last `days` days, oldest first. */
+    @Transactional(readOnly = true)
+    public List<BacklogDay> backlogHistory(UUID userId, int days) {
+        return backlog.since(userId, today().minusDays(Math.max(1, Math.min(days, 366)))).stream()
+                .map(r -> new BacklogDay(r[0] instanceof java.sql.Date d ? d.toLocalDate() : (LocalDate) r[0], ((Number) r[1]).intValue(), ((Number) r[2]).intValue()))
+                .toList();
     }
 
     /** Puts a topic in the schedule, first review tomorrow. Idempotent: an existing topic keeps its progress (and resumes if paused). */

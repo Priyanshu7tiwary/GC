@@ -6,6 +6,7 @@
 // Generated mocks are played and scored through the API, so their answer keys never reach the browser before submit.
 import { api } from './api.js';
 import { fromServer } from './catalog.js';
+import { toAttempt } from './progress.js';
 import { ALL_TOPICS } from '../data/syllabus.js';
 
 /** Questions per section in a generated mock (the server's app.generator.questions-per-section). */
@@ -81,7 +82,7 @@ export async function loadServerPaper(mockId) {
   })));
 }
 
-/** Scores an attempt on the server and returns it in the local attempt shape (plus the server's attempt id). */
+/** Scores an attempt on the server and returns it in the app's attempt shape. */
 export async function submitServerAttempt(mock, sections, answers, timeBySection) {
   const detail = await api(`/api/mocks/${encodeURIComponent(mock.id)}/attempts`, {
     method: 'POST',
@@ -91,37 +92,17 @@ export async function submitServerAttempt(mock, sections, answers, timeBySection
       sections,
     },
   });
-  const s = detail.summary;
-  return {
-    serverAttemptId: s.id,
-    score: s.score,
-    max: s.maxScore,
-    percentile: s.percentile ?? undefined,
-    sections: Object.fromEntries(Object.entries(s.sections).map(([k, r]) => [k, {
-      correct: r.correct, wrong: r.wrong, unattempted: r.unattempted, score: r.score, time: r.timeSeconds,
-    }])),
-    questionIds: detail.solutions.map((x) => x.questionId),
-  };
-}
-
-/** Questions with keys and explanations for a server-scored attempt (for the result page). */
-export async function loadServerSolutions(serverAttemptId) {
-  return (await loadServerAttempt(serverAttemptId)).questions;
+  return toAttempt(detail.summary);
 }
 
 /** A server-scored attempt: { questions (with keys and explanations), summary } where summary is in the local attempt shape. */
 export async function loadServerAttempt(serverAttemptId) {
   const detail = await api(`/api/attempts/${encodeURIComponent(serverAttemptId)}`);
-  const s = detail.summary;
-  const summary = {
-    score: s.score,
-    max: s.maxScore,
-    percentile: s.percentile ?? undefined,
-    sections: Object.fromEntries(Object.entries(s.sections).map(([k, r]) => [k, {
-      correct: r.correct, wrong: r.wrong, unattempted: r.unattempted, score: r.score, time: r.timeSeconds,
-    }])),
-  };
-  return { summary, questions: detail.solutions.map((x) => ({
+  const summary = toAttempt(detail.summary);
+  // the learner's answers in the app's shape: option index for MCQ, text for TITA
+  const answers = Object.fromEntries(detail.solutions.filter((x) => x.response != null)
+    .map((x) => [x.questionId, x.type === 'MCQ' ? Number(x.response) : x.response]));
+  return { summary, answers, questionIds: detail.solutions.map((x) => x.questionId), questions: detail.solutions.map((x) => ({
     id: x.questionId,
     section: x.section,
     topic: x.topic,

@@ -1,4 +1,4 @@
-# Render Blueprint for the CATalyst API + Postgres. The frontend runs on Vercel (frontend/vercel.json) and
+# Render Blueprint for the 99ile API + Postgres (an alternative to the Docker setup in DEPLOY.md). The frontend runs on Vercel (frontend/vercel.json) and
 # proxies /api/* to this service, so the browser only ever talks to the Vercel domain.
 # Deploy: Render dashboard -> New -> Blueprint -> pick this repo. Fill in the "sync: false" values when prompted.
 
@@ -62,3 +62,20 @@ services:
         sync: false
       - key: API_DOCS_ENABLED
         value: "false"
+      # Admins who may correct answer keys (comma-separated, verified emails)
+      - key: ADMIN_EMAILS
+        sync: false
+      # AI study plans: any OpenAI-compatible API; Groq's free tier by default
+      - key: AI_API_KEY
+        sync: false
+      - key: AI_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: AI_MODEL
+        value: openai/gpt-oss-120b
+      - key: AI_FALLBACK_MODEL
+        value: openai/gpt-oss-20b
+      - key: AI_WEEKLY_LIMIT
+        value: "3"
+      # Optional: Claude drafts new questions for generated mocks
+      - key: ANTHROPIC_API_KEY
+        sync: false

@@ -32,7 +32,15 @@ class RevisionController {
     /** Summary counts, 14-day forecast and every scheduled topic (paused topics included, flagged). */
     @GetMapping
     RevisionBoard board(@AuthenticationPrincipal AuthenticatedUser me) {
+        revisions.recordBacklog(me.id());
         return revisions.board(me.id());
+    }
+
+    /** Daily overdue / due counts for the backlog trend in Analytics. */
+    @GetMapping("/backlog")
+    List<RevisionService.BacklogDay> backlog(@AuthenticationPrincipal AuthenticatedUser me,
+                                             @org.springframework.web.bind.annotation.RequestParam(defaultValue = "180") int days) {
+        return revisions.backlogHistory(me.id(), days);
     }
 
     /** Puts a topic in the schedule (first review tomorrow). Idempotent; resumes a paused topic without resetting it. */

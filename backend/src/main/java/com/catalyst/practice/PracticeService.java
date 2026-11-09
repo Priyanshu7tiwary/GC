@@ -40,14 +40,18 @@ public class PracticeService {
     private final TopicRepository topics;
     private final AnswerChecker checker;
     private final Clock clock;
+    private final org.springframework.context.ApplicationEventPublisher events;
+    /** Study time credited for each newly solved question. */
+    static final int MINUTES_PER_SOLVED = 4;
 
     public PracticeService(QuestionPracticeRepository practice, QuestionRepository questions, TopicRepository topics,
-                           AnswerChecker checker, Clock clock) {
+                           AnswerChecker checker, Clock clock, org.springframework.context.ApplicationEventPublisher events) {
         this.practice = practice;
         this.questions = questions;
         this.topics = topics;
         this.checker = checker;
         this.clock = clock;
+        this.events = events;
     }
 
     public record TopicCounts(long questions, long keyed, long solved, long marked) {}
@@ -103,7 +107,9 @@ public class PracticeService {
         Outcome outcome = checker.check(q, answer);
         if (outcome == Outcome.SKIPPED) throw new BadRequestException("Enter an answer first.");
         QuestionPractice p = row(userId, questionId);
+        boolean wasSolved = p.isSolved();
         p.checked(answer.trim(), outcome == Outcome.CORRECT, clock.instant());
+        if (!wasSolved && p.isSolved()) credit(userId);
         return new CheckResult(outcome == Outcome.CORRECT, q.getAnswer(), q.getExplanation(), State.of(p));
     }
 
@@ -112,9 +118,15 @@ public class PracticeService {
     public PracticeQuestion mark(UUID userId, String questionId, Boolean solved, Boolean marked) {
         Question q = question(questionId);
         QuestionPractice p = row(userId, questionId);
+        boolean wasSolved = p.isSolved();
         if (solved != null) p.setSolved(solved, clock.instant());
+        if (!wasSolved && p.isSolved()) credit(userId);
         if (marked != null) p.setMarked(marked, clock.instant());
         return view(q, p);
+    }
+
+    private void credit(UUID userId) {
+        events.publishEvent(new com.catalyst.events.StudySessionEvent(userId, MINUTES_PER_SOLVED));
     }
 
     private QuestionPractice row(UUID userId, String questionId) {

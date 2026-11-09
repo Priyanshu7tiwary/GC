@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useStore } from '../lib/store.jsx';
-import { MOCKS, PYQ_YEARS } from '../data/mocks.js';
-import { usePapers } from '../lib/catalog.js';
+import { PYQ_YEARS } from '../data/mocks.js';
+import { useCatalog, usePapers } from '../lib/catalog.js';
 import { SECTIONS } from '../data/syllabus.js';
 import { generateMock, WORKFLOW, SECTION_QS, listServerMocks, deleteServerMock } from '../lib/mockGenerator.js';
 import { IconClock, IconTest, IconArrow, IconCheck } from '../components/Icons.jsx';
@@ -99,12 +99,18 @@ function PreviousYears({ byMock }) {
 function Sectional({ byMock }) {
   const [params] = useSearchParams();
   const [sec, setSec] = useState(SECTIONS[params.get('sec')] ? params.get('sec') : 'VARC');
-  const list = MOCKS.filter((m) => m.kind === 'sectional' && m.sections[0] === sec);
+  const { list: all, error } = useCatalog('SECTIONAL');
+  if (!all) {
+    return error
+      ? <div className="card"><p className="muted" style={{ margin: 0 }}>Couldn’t load the sectional tests: {error.message}</p></div>
+      : <div className="loading-card" role="status"><span className="ring" /><span>Loading sectional tests…</span></div>;
+  }
+  const list = all.filter((m) => m.sections[0] === sec);
   return (
     <>
       <div className="subject-row" style={{ marginBottom: 18 }}>
         {Object.values(SECTIONS).map((s) => {
-          const n = MOCKS.filter((m) => m.kind === 'sectional' && m.sections[0] === s.id);
+          const n = all.filter((m) => m.sections[0] === s.id);
           return (
             <button key={s.id} className={`subject-btn ${sec === s.id ? 'active' : ''}`} style={{ '--c': s.color }} onClick={() => setSec(s.id)}>
               <i className="dot" style={{ background: s.color, width: 10, height: 10 }} />

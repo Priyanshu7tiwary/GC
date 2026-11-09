@@ -1,0 +1,73 @@
+# Production on a single server (e.g. an Oracle Cloud Always Free VM). Use together with docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Differences from the local setup:
+# - Caddy serves the site on ports 80/443 with automatic HTTPS for $DOMAIN; nothing else is reachable from outside.
+# - Real email is required (no Mailpit), and session cookies are HTTPS-only.
+# - The database is backed up daily into ./backups.
+# See DEPLOY.md.
+
+services:
+  db:
+    ports: !reset []
+
+  mailpit:
+    profiles: ["dev"]          # not started in production
+
+  backend:
+    ports: !reset []
+    environment:
+      COOKIE_SECURE: "true"
+      SMTP_HOST: "${SMTP_HOST:?Set SMTP_HOST in .env - production needs a real email server}"
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_AUTH: ${SMTP_AUTH:-true}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+    depends_on: !override
+      db:
+        condition: service_healthy
+
+  frontend:
+    ports: !reset []
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env, e.g. 99ile.in}
+      ACME_EMAIL: "${ACME_EMAIL:?Set ACME_EMAIL in .env - Let's Encrypt sends certificate notices there}"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      PGHOST: db
+      PGDATABASE: ${POSTGRES_DB:-catalyst}
+      PGUSER: ${POSTGRES_USER:-catalyst}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ./backups:/backups
+      - ./deploy/backup.sh:/backup.sh:ro
+    entrypoint: ["/bin/sh", "/backup.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  caddy_data:
+  caddy_config:

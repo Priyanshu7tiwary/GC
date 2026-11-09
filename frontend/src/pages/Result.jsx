@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { useStore } from '../lib/store.jsx';
-import { QUESTIONS } from '../data/questions.js';
 import { SECTIONS } from '../data/syllabus.js';
 import { isScored } from '../lib/pyq.js';
 import { scoreQuestion } from '../lib/scoring.js';
@@ -14,7 +13,7 @@ import { IconArrow } from '../components/Icons.jsx';
 
 export default function Result() {
   const { attemptId } = useParams();
-  const { attempts, updateAttempt } = useStore();
+  const { attempts, updateAttempt, loaded } = useStore();
   const { isAdmin, adminMode } = useAdminMode();
   const [fixing, setFixing] = useState(null); // question id whose key an admin is correcting
   // Analytics links here as /mocks/result/<id>#q-<questionId>: show and highlight that question
@@ -23,28 +22,25 @@ export default function Result() {
   const a = attempts.find((x) => x.id === attemptId);
   const [filter, setFilter] = useState('all');
   const isPyq = !!a?.mockId?.startsWith('pyq-');
-  // Papers and generated mocks are scored by the server, which returns keys and explanations after submit. If an admin
-  // has corrected a key since, the server rescores the attempt and this copy's totals are updated to match.
-  const serverId = a?.serverAttemptId;
-  const [server, setServer] = useState({ questions: null, error: null });
+  // The server scored the attempt and returns keys, explanations and the learner's answers. If an admin has corrected
+  // a key since, the server rescores it and this copy's totals are updated to match.
+  const [server, setServer] = useState({ questions: null, answers: {}, error: null });
   const [reload, setReload] = useState(0);
   useEffect(() => {
-    if (!serverId) return undefined;
+    if (!a) return undefined;
     let live = true;
-    loadServerAttempt(serverId).then(({ questions, summary }) => {
+    loadServerAttempt(a.id).then(({ questions, answers, summary }) => {
       if (!live) return;
-      setServer({ questions, error: null });
+      setServer({ questions, answers, error: null });
       if (summary.score !== a.score || summary.max !== a.max || JSON.stringify(summary.sections) !== JSON.stringify(a.sections)) {
-        updateAttempt(a.id, summary);
+        updateAttempt(a.id, { score: summary.score, max: summary.max, percentile: summary.percentile, sections: summary.sections });
       }
-    }, (error) => live && setServer({ questions: null, error }));
+    }, (error) => live && setServer({ questions: null, answers: {}, error }));
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverId, reload]);
-  const pool = serverId ? server.questions || [] : isPyq ? [] : QUESTIONS;
-  const qs = !a?.answers ? []
-    : a.questionIds ? a.questionIds.map((id) => pool.find((q) => q.id === id)).filter(Boolean)
-    : QUESTIONS.filter((q) => a.sections[q.section]);
+  }, [a?.id, reload]);
+  const qs = server.questions || [];
+  const answers = server.answers;
   const onKeySaved = () => { setFixing(null); setReload((n) => n + 1); };
 
   const focusReady = !!focusId && qs.some((q) => q.id === focusId);
@@ -54,12 +50,13 @@ export default function Result() {
     requestAnimationFrame(() => document.getElementById(`q-${focusId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }, [focusReady, focusId]);
 
+  if (!a && !loaded) return <div className="page"><div className="loading-card" role="status"><span className="ring" /><span>Loading your result…</span></div></div>;
   if (!a) return <div className="page"><h1>Attempt not found</h1><Link to="/mocks" className="btn" style={{ marginTop: 16 }}>Back to mocks</Link></div>;
 
   const secs = Object.entries(a.sections);
   const tot = secs.reduce((t, [, s]) => ({ c: t.c + s.correct, w: t.w + s.wrong, u: t.u + s.unattempted }), { c: 0, w: 0, u: 0 });
   const acc = tot.c + tot.w ? Math.round((tot.c / (tot.c + tot.w)) * 100) : 0;
-  const shown = qs.filter((q) => filter === 'all' || scoreQuestion(q, a.answers[q.id]).result === filter);
+  const shown = qs.filter((q) => filter === 'all' || scoreQuestion(q, answers[q.id]).result === filter);
 
   return (
     <div className="page">
@@ -105,7 +102,6 @@ export default function Result() {
         </div>
       </div>
 
-      {a.answers ? (
         <div className="card">
           <div className="card-head">
             <div><h2>Solutions</h2><p>Review every question with explanations</p></div>
@@ -117,7 +113,7 @@ export default function Result() {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {shown.map((q) => {
-              const ans = a.answers[q.id];
+              const ans = answers[q.id];
               const r = scoreQuestion(q, ans);
               return (
                 <div key={q.id} id={`q-${q.id}`} className={`card ${focusId === q.id ? 'focus-ring' : ''}`} style={{ boxShadow: 'none', background: 'var(--bg)', scrollMarginTop: 80 }}>
@@ -128,11 +124,11 @@ export default function Result() {
                       {r.result === 'correct' ? '✓ Correct' : r.result === 'wrong' ? '✗ Wrong' : r.result === 'unscored' ? 'Not scored' : 'Skipped'} · {r.marks > 0 ? '+' : ''}{r.marks}
                     </span>
                   </div>
-                  {isPyq && serverId && (adminMode || fixing === q.id) ? (
+                  {isPyq && (adminMode || fixing === q.id) ? (
                     <div style={{ marginBottom: 12 }}>
                       <AnswerKeyEditor key={`${q.id}-${q.answer}-${fixing === q.id}`} q={q} startOpen={fixing === q.id} onSaved={onKeySaved} onClose={() => setFixing(null)} />
                     </div>
-                  ) : isPyq && serverId && isAdmin && (r.result === 'wrong' || r.result === 'unscored') && (
+                  ) : isPyq && isAdmin && (r.result === 'wrong' || r.result === 'unscored') && (
                     <div style={{ marginBottom: 12 }}>
                       <button className="btn sm" onClick={() => setFixing(q.id)}>Correct the answer key</button>
                     </div>
@@ -161,16 +157,12 @@ export default function Result() {
                 </div>
               );
             })}
-            {!shown.length && <p className="muted">{isPyq && !serverId
-                ? 'This attempt was taken before papers were scored on the server, so its question-by-question review isn’t available. Its totals above are kept.'
-                : serverId && !server.questions
-                  ? (server.error ? 'Couldn’t load the questions for this attempt.' : 'Loading questions…')
-                  : 'Nothing in this filter.'}</p>}
+            {!shown.length && <p className="muted">{!server.questions
+                ? (server.error ? 'Couldn’t load the questions for this attempt.' : 'Loading questions…')
+                : 'Nothing in this filter.'}</p>}
           </div>
         </div>
-      ) : (
-        <div className="card"><p className="muted" style={{ margin: 0 }}>Question-level solutions are available for attempts taken on this device.</p></div>
-      )}
+
     </div>
   );
 }
