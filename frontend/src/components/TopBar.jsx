@@ -18,5 +18,5 @@ export default function TopBar() {
     window.addEventListener('api-busy', onBusy);
     return () => { window.removeEventListener('api-busy', onBusy); clearTimeout(timer); };
   }, []);
-  return <div className={`topbar ${show ? 'on' : ''}`} role="progressbar" aria-label="Loading" aria-hidden={!show}><span /></div>;
+  return <div className={`loadbar ${show ? "on" : ""}`} role="progressbar" aria-label="Loading" aria-hidden={!show}><span /></div>;
 }

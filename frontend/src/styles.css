@@ -134,7 +134,7 @@ h3 { font-size: 14px; font-weight: 700; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
-  .topbar > span { width: 100%; opacity: .5; }
+  .loadbar > span { width: 100%; opacity: .5; }
 }
 
 /* ---------- layout ---------- */
@@ -199,9 +199,9 @@ h3 { font-size: 14px; font-weight: 700; }
 
 /* waiting on the server: a bar across the top, and a spinner where content is loading */
 /* loading bar: a faint 2px sweep, so waiting is noticeable without being loud */
-.topbar { position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 100; overflow: hidden; opacity: 0; pointer-events: none; transition: opacity .4s ease; }
-.topbar.on { opacity: .55; transition-delay: .1s; }
-.topbar > span {
+.loadbar { position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 100; overflow: hidden; opacity: 0; pointer-events: none; transition: opacity .4s ease; }
+.loadbar.on { opacity: .55; transition-delay: .1s; }
+.loadbar > span {
   position: absolute; top: 0; bottom: 0; left: 0; width: 35%;
   background: linear-gradient(90deg, transparent, var(--text-3) 50%, transparent);
   animation: topbar-run 1.8s cubic-bezier(.45, 0, .25, 1) infinite;
