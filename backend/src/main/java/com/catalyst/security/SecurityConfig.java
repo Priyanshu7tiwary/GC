@@ -41,7 +41,8 @@ class SecurityConfig {
                 .logout(l -> l.disable())
                 .authorizeHttpRequests(a -> {
                     a.requestMatchers("/api/auth/session", "/api/auth/login", "/api/auth/register", "/api/auth/google",
-                            "/api/auth/otp/verify", "/api/auth/otp/resend", "/api/auth/logout", "/actuator/health/**", "/error").permitAll();
+                            "/api/auth/otp/verify", "/api/auth/otp/resend", "/api/auth/password/forgot", "/api/auth/password/reset",
+                            "/api/auth/logout", "/actuator/health/**", "/error").permitAll();
                     if (docsEnabled) a.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
                     a.anyRequest().authenticated();
                 })

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
+import LoginHero from '../components/LoginHero.jsx';
 
 const GIS_SRC = 'https://accounts.google.com/gsi/client';
 
@@ -81,10 +82,111 @@ function OtpStep({ challenge, onVerify, onResend, onBack }) {
       {error && <div className="chip bad" style={{ borderRadius: 4, padding: '8px 10px', whiteSpace: 'normal' }} role="alert">{error}</div>}
       {info && <div className="chip good" style={{ borderRadius: 4, padding: '8px 10px' }}>{info}</div>}
       <button className="btn primary" type="submit" disabled={busy || code.length !== 6} style={{ padding: '11px 16px' }}>
-        {busy ? 'Verifying…' : challenge.purpose === 'SIGN_UP' ? 'Verify and create account' : 'Verify and sign in'}
+        {busy ? 'Verifying…' : challenge.purpose === 'SIGN_UP' ? 'Verify email and continue' : 'Verify and sign in'}
       </button>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
         <button type="button" className="btn ghost sm" onClick={onBack}>← Use a different email</button>
+        <button type="button" className="btn ghost sm" onClick={resend} disabled={wait > 0}>
+          {wait > 0 ? `Resend code in ${wait}s` : 'Resend code'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+const Alert = ({ kind = 'bad', children }) => (
+  <div className={`chip ${kind}`} style={{ borderRadius: 4, padding: '8px 10px', whiteSpace: 'normal' }} role={kind === 'bad' ? 'alert' : 'status'}>
+    {children}
+  </div>
+);
+
+/** Forgot password: step 1 asks for the email, step 2 takes the emailed code and a new password. */
+function ForgotPassword({ initialEmail, onDone, onBack }) {
+  const { forgotPassword, resetPassword, resendOtp } = useAuth();
+  const [email, setEmail] = useState(initialEmail || '');
+  const [challenge, setChallenge] = useState(null);
+  const [code, setCode] = useState('');
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  const wait = challenge ? Math.max(0, Math.ceil((new Date(challenge.resendAvailableAt).getTime() - now) / 1000)) : 0;
+
+  const requestCode = async (e) => {
+    e.preventDefault();
+    if (!/^\S+@\S+\.\S+$/.test(email)) return setError('Enter a valid email address.');
+    setBusy(true); setError('');
+    try { setChallenge(await forgotPassword(email.trim())); } catch (err) { setError(err.message); } finally { setBusy(false); }
+  };
+
+  const reset = async (e) => {
+    e.preventDefault();
+    if (!/^\d{6}$/.test(code)) return setError('Enter the 6-digit code from the email.');
+    if (pw.length < 8) return setError('Use at least 8 characters for your new password.');
+    if (pw !== pw2) return setError("The two passwords don't match.");
+    setBusy(true); setError(''); setInfo('');
+    try { await resetPassword(challenge.challengeId, code, pw); onDone(); }
+    catch (err) { setError(err.message); setCode(''); }
+    finally { setBusy(false); }
+  };
+
+  const resend = async () => {
+    setError(''); setInfo('');
+    try { setChallenge(await resendOtp(challenge.challengeId)); setInfo('We sent a new code.'); setCode(''); }
+    catch (err) { setError(err.message); }
+  };
+
+  if (!challenge) {
+    return (
+      <form className="auth-form" onSubmit={requestCode} noValidate>
+        <div>
+          <h1>Reset your password</h1>
+          <p className="muted" style={{ margin: '6px 0 0' }}>Enter your account's email and we'll send you a code to set a new password.</p>
+        </div>
+        <label className="field" htmlFor="reset-email">Email
+          <input id="reset-email" className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com" autoComplete="email" maxLength={254} autoFocus />
+        </label>
+        {error && <Alert>{error}</Alert>}
+        <button className="btn primary" type="submit" disabled={busy} style={{ padding: '11px 16px' }}>
+          {busy ? 'Sending code…' : 'Send reset code'}
+        </button>
+        <button type="button" className="btn ghost sm" onClick={() => onBack(email.trim())}>← Back to log in</button>
+      </form>
+    );
+  }
+
+  return (
+    <form className="auth-form" onSubmit={reset} noValidate>
+      <div>
+        <h1>Set a new password</h1>
+        <p className="muted" style={{ margin: '6px 0 0' }}>
+          If an account exists for <b>{challenge.emailHint}</b>, we've sent it a 6-digit code. It expires in 10 minutes.
+        </p>
+      </div>
+      <label className="field" htmlFor="reset-code">Code
+        <input id="reset-code" className="input num otp-input" inputMode="numeric" autoComplete="one-time-code" autoFocus
+          maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="••••••" />
+      </label>
+      <label className="field" htmlFor="reset-pw">New password
+        <input id="reset-pw" className="input" type="password" value={pw} onChange={(e) => setPw(e.target.value)}
+          placeholder="At least 8 characters" autoComplete="new-password" maxLength={72} />
+      </label>
+      <label className="field" htmlFor="reset-pw2">Confirm new password
+        <input id="reset-pw2" className="input" type="password" value={pw2} onChange={(e) => setPw2(e.target.value)}
+          aria-invalid={pw2.length > 0 && pw2 !== pw} autoComplete="new-password" maxLength={72} />
+      </label>
+      {error && <Alert>{error}</Alert>}
+      {info && <Alert kind="good">{info}</Alert>}
+      <button className="btn primary" type="submit" disabled={busy || code.length !== 6} style={{ padding: '11px 16px' }}>
+        {busy ? 'Saving…' : 'Save password and log in'}
+      </button>
+      <p className="small faint" style={{ margin: 0, textAlign: 'center' }}>This signs you out on all other devices.</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+        <button type="button" className="btn ghost sm" onClick={() => { setChallenge(null); setError(''); setInfo(''); }}>← Different email</button>
         <button type="button" className="btn ghost sm" onClick={resend} disabled={wait > 0}>
           {wait > 0 ? `Resend code in ${wait}s` : 'Resend code'}
         </button>
@@ -102,8 +204,12 @@ export default function Login() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [challenge, setChallenge] = useState(null);
+  const [badCredentials, setBadCredentials] = useState(false);
+  const passwordRef = useRef(null);
 
-  const goNext = () => nav(loc.state?.from || '/', { replace: true });
+  // only ever return to a path on this site (never "//evil.com" or "/\\evil.com")
+  const from = typeof loc.state?.from === 'string' && /^\/(?![\/\\])/.test(loc.state.from) ? loc.state.from : '/';
+  const goNext = () => nav(from, { replace: true });
   // stable callbacks so the Google button isn't re-initialised on every render
   const googleRef = useRef({});
   googleRef.current = { loginWithGoogle, goNext };
@@ -113,9 +219,10 @@ export default function Login() {
   });
   const [onGoogleError] = useState(() => (msg) => setError(msg));
 
-  if (status === 'authenticated') return <Navigate to={loc.state?.from || '/'} replace />;
+  if (status === 'authenticated') return <Navigate to={from} replace />;
 
-  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const set = (k) => (e) => { setForm({ ...form, [k]: e.target.value }); setBadCredentials(false); };
+  const switchMode = (m) => { setMode(m); setError(''); setBadCredentials(false); };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -123,15 +230,24 @@ export default function Login() {
     if (!/^\S+@\S+\.\S+$/.test(form.email)) return setError('Enter a valid email address.');
     if (mode === 'signup' && form.password.length < 8) return setError('Use at least 8 characters for your password.');
     if (!form.password) return setError('Enter your password.');
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setBadCredentials(false);
     try {
       const c = mode === 'signup'
         ? await register(form.name.trim(), form.email.trim(), form.password)
         : await login(form.email.trim(), form.password);
-      setChallenge(c);
       setForm((f) => ({ ...f, password: '' })); // don't keep the password in memory longer than needed
+      if (c) setChallenge(c); // a new or unverified account confirms its email first
+      else goNext();          // verified account: signed in already
     } catch (err) {
-      setError(err.message);
+      if (mode === 'login' && err.status === 401) {
+        // wrong email or password: say so plainly, mark both fields and let them retype the password
+        setBadCredentials(true);
+        setError('Incorrect email or password. Check both and try again, or reset your password.');
+        setForm((f) => ({ ...f, password: '' }));
+        setTimeout(() => passwordRef.current?.focus(), 0);
+      } else {
+        setError(err.message);
+      }
     } finally {
       setBusy(false);
     }
@@ -139,18 +255,7 @@ export default function Login() {
 
   return (
     <div className="auth">
-      <section className="auth-hero">
-        <div className="brand" style={{ padding: 0 }}><img className="brand-logo" src="/brand/99ile-on-dark.png" alt="99ile" /></div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <h1>Your 99+ percentile, one deliberate day at a time.</h1>
-          <p>Full-length mocks in the real CAT interface, a spaced-repetition revision tracker, and a syllabus map that shows exactly what's left.</p>
-        </div>
-        <div className="hero-stats">
-          <div><b>3</b><span>sections · 40 min each</span></div>
-          <div><b>68</b><span>questions per mock</span></div>
-          <div><b>+3 / −1</b><span>marking scheme</span></div>
-        </div>
-      </section>
+      <LoginHero />
 
       <section className="auth-form-wrap">
         {status === 'loading' ? (
@@ -162,6 +267,8 @@ export default function Login() {
             onResend={async () => setChallenge(await resendOtp(challenge.challengeId))}
             onBack={() => { setChallenge(null); setError(''); }}
           />
+        ) : mode === 'forgot' ? (
+          <ForgotPassword initialEmail={form.email} onDone={goNext} onBack={(email) => { if (email) setForm((f) => ({ ...f, email })); switchMode('login'); }} />
         ) : (
           <form className="auth-form" onSubmit={submit} noValidate>
             <div>
@@ -180,25 +287,43 @@ export default function Login() {
               </label>
             )}
             <label className="field" htmlFor="email">Email
-              <input id="email" className="input" type="email" value={form.email} onChange={set('email')} placeholder="you@example.com" autoComplete="email" maxLength={254} />
+              <input id="email" className="input" type="email" aria-invalid={badCredentials} value={form.email} onChange={set('email')} placeholder="you@example.com" autoComplete="email" maxLength={254} />
             </label>
-            <label className="field" htmlFor="password">Password
-              <input id="password" className="input" type="password" value={form.password} onChange={set('password')}
-                placeholder={mode === 'signup' ? 'At least 8 characters' : '••••••••'} maxLength={72}
-                autoComplete={mode === 'login' ? 'current-password' : 'new-password'} />
-            </label>
+            <div style={{ position: 'relative' }}>
+              <label className="field" htmlFor="password">Password
+                <input id="password" ref={passwordRef} className="input" type="password" aria-invalid={badCredentials} value={form.password} onChange={set('password')}
+                  placeholder={mode === 'signup' ? 'At least 8 characters' : '••••••••'} maxLength={72}
+                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'} />
+              </label>
+              {mode === 'login' && (
+                <button type="button" className="link-btn" style={{ position: 'absolute', top: 0, right: 0 }}
+                  onClick={() => switchMode('forgot')}>Forgot password?</button>
+              )}
+            </div>
 
-            {error && <div className="chip bad" style={{ borderRadius: 4, padding: '8px 10px', whiteSpace: 'normal' }} role="alert">{error}</div>}
+            {error && (
+              <Alert>
+                <span>
+                  {error}
+                  {badCredentials && (
+                    <> <button type="button" className="link-btn" style={{ color: 'inherit', fontSize: 'inherit', display: 'inline' }}
+                      onClick={() => switchMode('forgot')}>Reset password</button></>
+                  )}
+                </span>
+              </Alert>
+            )}
 
             <button className="btn primary" type="submit" disabled={busy} style={{ padding: '11px 16px' }}>
-              {busy ? 'Sending code…' : mode === 'login' ? 'Continue' : 'Create account'}
+              {busy ? (mode === 'login' ? 'Logging in…' : 'Creating account…') : mode === 'login' ? 'Log in' : 'Create account'}
             </button>
-            <p className="small faint" style={{ margin: 0, textAlign: 'center' }}>We’ll email you a one-time code to confirm it’s you.</p>
+            {mode === 'signup' && (
+              <p className="small faint" style={{ margin: 0, textAlign: 'center' }}>We’ll email you a code to verify your address.</p>
+            )}
 
             <p className="small muted" style={{ textAlign: 'center', margin: 0 }}>
               {mode === 'login' ? "Don't have an account? " : 'Already registered? '}
               <button type="button" className="btn ghost sm" style={{ padding: '2px 4px' }}
-                onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); }}>
+                onClick={() => switchMode(mode === 'login' ? 'signup' : 'login')}>
                 {mode === 'login' ? 'Sign up' : 'Log in'}
               </button>
             </p>

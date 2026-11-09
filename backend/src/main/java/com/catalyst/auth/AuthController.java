@@ -1,9 +1,11 @@
 package com.catalyst.auth;
 
+import com.catalyst.auth.dto.ForgotPasswordRequest;
 import com.catalyst.auth.dto.GoogleLoginRequest;
 import com.catalyst.auth.dto.LoginRequest;
 import com.catalyst.auth.dto.RegisterRequest;
 import com.catalyst.auth.dto.ResendOtpRequest;
+import com.catalyst.auth.dto.ResetPasswordRequest;
 import com.catalyst.auth.dto.VerifyOtpRequest;
 import com.catalyst.auth.otp.OtpChallengeView;
 import com.catalyst.auth.otp.OtpPurpose;
@@ -17,6 +19,7 @@ import com.catalyst.user.dto.ProfileResponse;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -68,11 +71,17 @@ class AuthController {
         return otp.start(auth.register(req), OtpPurpose.SIGN_UP);
     }
 
-    /** Step 1 of password sign-in: checks the password, then emails a one-time code. */
+    /**
+     * Password sign-in. A verified account is signed in straight away (200 with the profile). An account whose email
+     * was never verified gets a verification code instead (202 with the challenge), and signs in once it's entered.
+     */
     @PostMapping("/login")
-    @ResponseStatus(HttpStatus.ACCEPTED)
-    OtpChallengeView login(@Valid @RequestBody LoginRequest req) {
-        return otp.start(auth.login(req), OtpPurpose.SIGN_IN);
+    ResponseEntity<?> login(@Valid @RequestBody LoginRequest req, HttpServletResponse res) {
+        User user = auth.login(req);
+        if (!user.isEmailVerified()) {
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body(otp.start(user, OtpPurpose.SIGN_UP));
+        }
+        return ResponseEntity.ok(start(user, res));
     }
 
     /** Step 2: a correct code starts the session. */
@@ -84,6 +93,24 @@ class AuthController {
     @PostMapping("/otp/resend")
     OtpChallengeView resendOtp(@Valid @RequestBody ResendOtpRequest req) {
         return otp.resend(req.challengeId());
+    }
+
+    /**
+     * Forgot password, step 1: emails a reset code if the account exists. The response looks the same
+     * for unknown emails, so this can't be used to find out who has an account.
+     */
+    @PostMapping("/password/forgot")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    OtpChallengeView forgotPassword(@Valid @RequestBody ForgotPasswordRequest req) {
+        return auth.findForPasswordReset(req.email())
+                .map(u -> otp.start(u, OtpPurpose.PASSWORD_RESET))
+                .orElseGet(() -> otp.decoy(req.email().trim().toLowerCase(), OtpPurpose.PASSWORD_RESET));
+    }
+
+    /** Step 2: a correct code sets the new password, signs out other devices and signs in here. */
+    @PostMapping("/password/reset")
+    ProfileResponse resetPassword(@Valid @RequestBody ResetPasswordRequest req, HttpServletResponse res) {
+        return start(auth.resetPassword(req.challengeId(), req.code(), req.password()), res);
     }
 
     @PostMapping("/google")

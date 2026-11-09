@@ -61,7 +61,16 @@ public class User {
         return u;
     }
 
+    /**
+     * Links a Google identity (Google has verified the email). If this account was never verified, its password was set
+     * by someone who never proved they own the address, so it is discarded and any sessions are ended; otherwise whoever
+     * pre-registered the email could keep signing in to the real owner's account.
+     */
     public void linkGoogle(String subject) {
+        if (!emailVerified) {
+            this.passwordHash = null;
+            this.sessionVersion++;
+        }
         this.googleSubject = subject;
         this.emailVerified = true;
     }
@@ -76,6 +85,9 @@ public class User {
 
     /** Invalidates every token issued so far (logout everywhere). */
     public void revokeSessions() { this.sessionVersion++; }
+
+    /** Sets a new password; callers should also revoke existing sessions. */
+    public void changePassword(String passwordHash) { this.passwordHash = passwordHash; }
 
     public boolean hasPassword() { return passwordHash != null; }
 

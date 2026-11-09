@@ -95,6 +95,29 @@ class OtpServiceTest {
         assertThatThrownBy(() -> otp.verify(UUID.randomUUID(), "123456")).isInstanceOf(UnauthorizedException.class);
     }
 
+    @Test
+    void resetCodesOnlyWorkForPasswordReset() {
+        var reset = otp.start(user, OtpPurpose.PASSWORD_RESET);
+        String code = sender.code;
+        // a reset code can't be used to just sign in, and a rejected purpose doesn't use the code up
+        assertThatThrownBy(() -> otp.verify(reset.challengeId(), code)).isInstanceOf(UnauthorizedException.class);
+        assertThat(otp.verify(reset.challengeId(), code, OtpPurpose.PASSWORD_RESET)).isSameAs(user);
+
+        var signIn = otp.start(user, OtpPurpose.SIGN_IN);
+        assertThatThrownBy(() -> otp.verify(signIn.challengeId(), sender.code, OtpPurpose.PASSWORD_RESET))
+                .isInstanceOf(UnauthorizedException.class);
+    }
+
+    @Test
+    void decoyLooksLikeARealChallengeButSendsNothing() {
+        var decoy = otp.decoy("nobody@example.com", OtpPurpose.PASSWORD_RESET);
+        assertThat(sender.code).isNull();
+        assertThat(decoy.emailHint()).isEqualTo("n•••y@example.com");
+        assertThat(decoy.purpose()).isEqualTo(OtpPurpose.PASSWORD_RESET);
+        assertThatThrownBy(() -> otp.verify(decoy.challengeId(), "123456", OtpPurpose.PASSWORD_RESET))
+                .isInstanceOf(UnauthorizedException.class);
+    }
+
     static class CapturingSender implements OtpSender {
         String code;
         public void send(String email, String name, String code, OtpPurpose purpose, Duration validFor) { this.code = code; }

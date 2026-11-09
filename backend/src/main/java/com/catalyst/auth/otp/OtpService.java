@@ -67,11 +67,31 @@ public class OtpService {
         return view(c, user);
     }
 
-    /** Checks the code; on success the challenge is used up and the (now email-verified) user is returned. */
+    /**
+     * What /forgot returns for an email with no account: looks like a real challenge, so the response
+     * doesn't reveal whether the address is registered. Nothing is stored and no email is sent.
+     */
+    public OtpChallengeView decoy(String email, OtpPurpose purpose) {
+        Instant now = clock.instant();
+        return new OtpChallengeView(UUID.randomUUID(), purpose, mask(email), now.plus(VALID_FOR), now.plus(RESEND_COOLDOWN));
+    }
+
+    /** Checks a sign-up or sign-in code; on success the challenge is used up and the (now email-verified) user is returned. */
     @Transactional(noRollbackFor = UnauthorizedException.class)
     public User verify(UUID challengeId, String code) {
+        return check(challengeId, code, OtpPurpose.SIGN_UP, OtpPurpose.SIGN_IN);
+    }
+
+    /** Like {@link #verify(UUID, String)}, but only accepts a challenge started for one of {@code allowed}. */
+    @Transactional(noRollbackFor = UnauthorizedException.class)
+    public User verify(UUID challengeId, String code, OtpPurpose... allowed) {
+        return check(challengeId, code, allowed);
+    }
+
+    private User check(UUID challengeId, String code, OtpPurpose... allowed) {
         Instant now = clock.instant();
         OtpChallenge c = open(challengeId, now);
+        if (!java.util.List.of(allowed).contains(c.getPurpose())) throw invalid();
         if (c.getAttempts() >= MAX_ATTEMPTS) {
             c.consume(now);
             throw new UnauthorizedException("Too many wrong codes. Start again to get a new one.");

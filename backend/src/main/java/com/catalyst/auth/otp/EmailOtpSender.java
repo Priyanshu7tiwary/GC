@@ -26,7 +26,17 @@ class EmailOtpSender implements OtpSender {
         SimpleMailMessage msg = new SimpleMailMessage();
         msg.setFrom(from);
         msg.setTo(email);
-        msg.setSubject(code + " is your 99ile " + (purpose == OtpPurpose.SIGN_UP ? "verification" : "sign-in") + " code");
+        String kind = switch (purpose) {
+            case SIGN_UP -> "verification";
+            case SIGN_IN -> "sign-in";
+            case PASSWORD_RESET -> "password reset";
+        };
+        String action = switch (purpose) {
+            case SIGN_UP -> "create an account";
+            case SIGN_IN -> "sign in";
+            case PASSWORD_RESET -> "reset your password";
+        };
+        msg.setSubject(code + " is your 99ile " + kind + " code");
         msg.setText("""
                 Hi %s,
 
@@ -35,8 +45,7 @@ class EmailOtpSender implements OtpSender {
                     %s
 
                 It expires in %d minutes. If you didn't try to %s, ignore this email; your account stays safe without the code.
-                """.formatted(name, purpose == OtpPurpose.SIGN_UP ? "verification" : "sign-in", code, validFor.toMinutes(),
-                purpose == OtpPurpose.SIGN_UP ? "create an account" : "sign in"));
+                """.formatted(name, kind, code, validFor.toMinutes(), action));
         try {
             mail.send(msg);
         } catch (MailException e) {

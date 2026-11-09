@@ -114,12 +114,56 @@ function Player({ mock }) {
     return () => clearInterval(t);
   }, [secId, ready]);
 
+  // Like the real exam, a running test can't be left with the browser's Back button: an extra history entry
+  // absorbs it and opens the quit dialog instead. Quitting submits the test, and the result page replaces it.
+  const paperLoaded = !isServer || !!server.questions;
+  const leaving = useRef(false);
+  useEffect(() => {
+    if (!paperLoaded) return undefined;
+    const trap = () => {
+      if (!window.history.state?.testTrap) window.history.pushState({ ...window.history.state, testTrap: true }, '', window.location.href);
+    };
+    trap();
+    const onPop = () => {
+      if (leaving.current) return;
+      trap();
+      setConfirm('exit');
+    };
+    const onUnload = (e) => {
+      if (leaving.current) return;
+      e.preventDefault();
+      e.returnValue = ''; // the browser shows its own "Leave site?" prompt on refresh or close
+    };
+    window.addEventListener('popstate', onPop);
+    window.addEventListener('beforeunload', onUnload);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      window.removeEventListener('beforeunload', onUnload);
+    };
+  }, [paperLoaded]);
+
+  /** Removes the Back-button trap so the next page replaces this test in the history. */
+  const releaseTrap = () => new Promise((resolve) => {
+    leaving.current = true;
+    if (!window.history.state?.testTrap) return resolve();
+    const done = () => { window.removeEventListener('popstate', done); resolve(); };
+    window.addEventListener('popstate', done);
+    window.history.back();
+  });
+
+  const leaveWithoutSaving = async () => {
+    await releaseTrap();
+    nav('/mocks', { replace: true });
+  };
+
   // Every mock is scored by the server; the result page then loads the solutions from it.
   const finish = async (finalAnswers) => {
+    setConfirm(null);
     setSubmit({ busy: true, error: null, answers: finalAnswers });
     try {
       const attempt = await submitServerAttempt(mock, sections, finalAnswers, timeUsed.current);
       addAttempt({ ...attempt, title });
+      await releaseTrap();
       nav(`/mocks/result/${attempt.id}`, { replace: true });
     } catch (e) {
       setSubmit({ busy: false, error: e.message || 'Could not submit the test.', answers: finalAnswers });
@@ -148,7 +192,10 @@ function Player({ mock }) {
           {submit.error ? (
             <>
               <p className="muted">Your answers are safe in this tab, but they couldn’t be submitted: {submit.error}</p>
-              <button className="btn primary" disabled={submit.busy} onClick={() => finish(submit.answers)}>Try again</button>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <button className="btn primary" disabled={submit.busy} onClick={() => finish(submit.answers)}>Try again</button>
+                <button className="btn ghost" disabled={submit.busy} onClick={leaveWithoutSaving}>Leave without saving</button>
+              </div>
             </>
           ) : <p className="muted" style={{ marginBottom: 0 }}>Scoring your test…</p>}
         </div>
@@ -210,7 +257,7 @@ function Player({ mock }) {
           <span className="small faint">Time left</span>
           <span className={`timer ${left < 300 ? 'low' : ''}`}>{fmt(Math.max(0, left))}</span>
           {isPyq && <AdminModeSwitch compact />}
-          <button className="btn sm ghost" onClick={() => setConfirm('exit')}>Exit</button>
+          <button className="btn sm ghost" onClick={() => setConfirm('exit')}>Quit test</button>
         </div>
       </div>
 
@@ -298,11 +345,14 @@ function Player({ mock }) {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             {confirm === 'exit' ? (
               <>
-                <h2>Exit this test?</h2>
-                <p className="muted">Your progress in this attempt will be lost.</p>
+                <h2>Quit the test?</h2>
+                <p className="muted">
+                  Your saved answers ({Object.keys(answers).length} so far) will be submitted and scored, and you'll see the test summary.
+                  Unanswered questions score zero, and this attempt can't be resumed.
+                </p>
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                   <button className="btn" onClick={() => setConfirm(null)}>Keep going</button>
-                  <button className="btn primary" style={{ background: 'var(--bad)', borderColor: 'var(--bad)' }} onClick={() => nav('/mocks')}>Exit test</button>
+                  <button className="btn primary" style={{ background: 'var(--bad)', borderColor: 'var(--bad)' }} onClick={() => finish(answers)}>Quit and see summary</button>
                 </div>
               </>
             ) : (
