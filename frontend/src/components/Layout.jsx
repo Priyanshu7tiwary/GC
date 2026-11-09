@@ -4,6 +4,7 @@ import SuggestionsPanel from './SuggestionsPanel.jsx';
 import { buildSuggestions } from '../lib/suggestions.js';
 import { useStore, today, daysBetween, revisionBuckets } from '../lib/store.jsx';
 import { useAuth } from '../lib/auth.jsx';
+import { AdminModeSwitch, useAdminMode } from '../lib/adminMode.jsx';
 import { IconHome, IconTest, IconRevise, IconCoverage, IconChart, IconLogout, IconMoon, IconSun, IconCalendar, IconSparkle } from './Icons.jsx';
 
 const NAV = [
@@ -31,6 +32,7 @@ export default function Layout() {
   const store = useStore();
   const { examDate, revisions } = store;
   const { user, logout } = useAuth();
+  const { isAdmin } = useAdminMode();
   const [suggOpen, setSuggOpen] = useState(false);
   const closeSugg = useCallback(() => setSuggOpen(false), []);
   const highCount = buildSuggestions(store).filter((s) => s.priority === 'high').length;
@@ -43,13 +45,14 @@ export default function Layout() {
   return (
     <div className="app">
       <aside className="sidebar">
-        <div className="brand"><div className="brand-mark">C</div>CATalyst</div>
+        <div className="brand"><img className="brand-logo logo-light" src="/brand/99ile-on-light.png" alt="99ile" /><img className="brand-logo logo-dark" src="/brand/99ile-on-dark.png" alt="" aria-hidden="true" /></div>
         {NAV.map((n) => (
           <NavLink key={n.to} to={n.to} end={n.end} className="nav-link">
             <n.icon />{n.label}
             {n.to === '/revision' && dueCount > 0 && <span className="chip bad" style={{ marginLeft: 'auto', padding: '1px 7px' }}>{dueCount}</span>}
           </NavLink>
         ))}
+        {isAdmin && <NavLink to="/admin/questions" className="nav-link"><IconCoverage />Question bank</NavLink>}
         <button className="sugg-btn" onClick={() => setSuggOpen(true)}>
           <IconSparkle />
           <span style={{ flex: 1, textAlign: 'left' }}>
@@ -79,9 +82,10 @@ export default function Layout() {
             <span className="chip accent"><IconCalendar width="14" height="14" />{Math.max(0, days)} days to CAT</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <AdminModeSwitch compact />
             <button className="btn sm mobile-only" onClick={() => setSuggOpen(true)} aria-label="Suggestions"><IconSparkle />Tips</button>
             <button className="btn ghost sm mobile-only" onClick={toggle} aria-label="Toggle theme">{isDark ? <IconSun /> : <IconMoon />}</button>
-            <div style={{ textAlign: 'right' }}>
+            <div className="topbar-user" style={{ textAlign: 'right' }}>
               <div style={{ fontWeight: 600 }}>{user?.name}</div>
               <div className="small faint">{user?.email}</div>
             </div>

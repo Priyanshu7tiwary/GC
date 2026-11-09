@@ -1,4 +1,6 @@
-# CATalyst
+# 99ile
+
+> Formerly CATalyst. Internal identifiers (the `com.catalyst` Java package, the `catalyst` database and Compose project, cookie and browser-storage keys) keep the old name so existing sessions and saved progress keep working.
 
 A CAT (Common Admission Test) preparation platform: mock tests in the real exam interface, a spaced-repetition revision tracker, syllabus coverage, an AI mock generator and personalised suggestions.
 
@@ -56,6 +58,21 @@ docker compose up -d --build
 
 **Before going public:** serve the site over HTTPS behind a TLS proxy and enable HSTS. Use a real SMTP provider and set `GOOGLE_CLIENT_ID` for your domain. If you run more than one API instance, move the rate limiter to Redis. Progress data (coverage, revisions, attempts) is still kept in each user's browser, separated per account; moving it to the API is the next step.
 
+## Deploy (Vercel + Render)
+
+Vercel hosts the static frontend only. The Spring Boot API and Postgres run on Render (`render.yaml`). Vercel proxies `/api/*` to the API (`frontend/vercel.json`), so the browser only ever talks to the Vercel domain and the session cookies stay first-party.
+
+1. **API + database on Render.** Dashboard → *New* → *Blueprint* → pick this repo. It creates `catalyst-db` and `catalyst-api` and generates `JWT_SECRET`. Leave `CORS_ORIGINS` blank for now. Wait until `https://catalyst-api.onrender.com/actuator/health/readiness` returns `UP`. If Render gives the service a different URL, update the `/api` rewrite in `frontend/vercel.json`.
+2. **Frontend on Vercel.** *Add New* → *Project* → import this repo, set **Root Directory** to `frontend` (Vite is detected; `vercel.json` sets the rest). Deploy it.
+3. **Connect them.** Set `CORS_ORIGINS` on Render to your Vercel URL, e.g. `https://catalyst.vercel.app` (comma-separate extra domains), then redeploy the API. Every request goes through the proxy, which sends the Vercel origin, so the API has to allow it.
+4. **Email.** Set `SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD` and `MAIL_FROM` on Render (Brevo, Resend, SendGrid…). Render's free tier blocks ports 25/465/587, so keep `SMTP_PORT=2525`. Until SMTP is set, sign-in codes show up in the Render logs.
+5. **Google sign-in (optional).** Add the Vercel URL to the OAuth client's *Authorized JavaScript origins* and set `GOOGLE_CLIENT_ID` on Render.
+
+Notes:
+- **Preview deployments** get their own `*.vercel.app` URLs. Sign-in only works on them if you add those URLs to `CORS_ORIGINS`.
+- **Free-tier limits.** Render's free web service sleeps when idle (the first request takes around a minute), and its free Postgres expires after 30 days. Upgrade, or point `DB_URL`/`DB_USER`/`DB_PASSWORD` at another Postgres (Neon, Supabase…), e.g. `jdbc:postgresql://host/db?sslmode=require`.
+- **Client IPs.** `SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES=.*` trusts `X-Forwarded-For` so rate limits count real client IPs (Vercel overwrites that header). Someone calling the Render URL directly could spoof it, which weakens only the per-IP limits. The per-account limits still apply.
+
 ## Develop
 
 ```bash
@@ -71,4 +88,4 @@ See [backend/README.md](backend/README.md) for the API, package layout and desig
 
 ## CAT past papers
 
-Official slot-wise CAT question-paper PDFs for 2017–2025 are bundled in `frontend/public/cat-papers/` and linked to the existing previous-year mock records by Flyway migration V5. IIMs did not publicly release official papers for 2011–2016; those years are recorded as unavailable rather than populated with unverified reconstructions. See `resources/cat_pyq_official/README.md` for source details and file checksums.
+The 24 official CAT 2017–2025 slot papers are playable tests. They live in the database (Flyway migrations V7 and V9), and the API lists, serves, scores and reviews them: the browser gets a paper from `GET /api/mocks/<id>/paper` without its answer keys, and sees the keys and explanations only after submitting. Question text was extracted from the official papers. Maths that the text extraction lost (radicals, powers, fractions) was restored from 2IIM's TeX transcription and renders with KaTeX. Set figures and tables that were images in the PDFs are bundled in `frontend/public/pyq/img/`. Answer keys were cross-checked against 2IIM's published solutions: 1,812 of 1,830 questions have a key, and the other 18 appear in the paper but are not scored. 6 questions still refer to a figure that isn't available, and are flagged in the player. IIMs did not publicly release official papers for 2011–2016; those years are recorded as unavailable rather than populated with unverified reconstructions. See `resources/cat_pyq_answer_keys/README.md`.

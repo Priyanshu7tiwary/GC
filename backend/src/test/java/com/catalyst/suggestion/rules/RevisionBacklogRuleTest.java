@@ -33,7 +33,7 @@ class RevisionBacklogRuleTest {
     }
 
     private RevisionView item(int delta, Bucket b) {
-        return new RevisionView("t" + delta, "Topic " + delta, Section.QA, "Algebra", 0, 1, today, today.plusDays(delta), delta, 1, b);
+        return new RevisionView("t" + delta, "Topic " + delta, Section.QA, "Algebra", 0, 1, today, today, today.plusDays(delta), delta, 1, b, false, delta <= 0);
     }
 
     private LearnerSnapshot snapshot(List<RevisionView> items) {

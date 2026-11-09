@@ -35,6 +35,9 @@ public class User {
     private LocalDate examDate;
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
+    /** May correct answer keys. Set directly in the database (see AdminPolicy for the ADMIN_EMAILS alternative). */
+    @Column(name = "is_admin", nullable = false)
+    private boolean admin;
 
     protected User() {}
 
@@ -96,4 +99,5 @@ public class User {
     public int getTargetYear() { return targetYear; }
     public LocalDate getExamDate() { return examDate; }
     public Instant getCreatedAt() { return createdAt; }
+    public boolean isAdmin() { return admin; }
 }

@@ -2,8 +2,10 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
 import { useStore, coverageStats, revisionBuckets, streak, today, daysBetween } from '../lib/store.jsx';
 import { ALL_TOPICS, SECTIONS } from '../data/syllabus.js';
-import { MOCKS } from '../data/mocks.js';
+import { usePapers } from '../lib/catalog.js';
 import { LineChart, Ring, Heatmap, SegBar } from '../components/Charts.jsx';
+import EffortGauge from '../components/EffortGauge.jsx';
+import { effortFor } from '../lib/effort.js';
 import { IconFlame, IconTest, IconRevise, IconCoverage, IconArrow, IconTarget, IconAlert } from '../components/Icons.jsx';
 
 const fmtDate = (t) => new Date(t).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
@@ -19,6 +21,9 @@ export default function Dashboard() {
   const prev = fulls[fulls.length - 2];
   const bestPct = Math.max(0, ...fulls.map((a) => a.percentile || 0));
   const days = daysBetween(today(), examDate);
+  const effortIn = { activity, attempts, overdue: overdue.length, scheduled: Object.keys(revisions).length };
+  const effort = effortFor(effortIn, today());
+  const lastWeekEffort = effortFor(effortIn, today() - 7 * 86400000);
   const weekMin = Array.from({ length: 7 }, (_, i) => activity[today() - i * 86400000] || 0).reduce((a, b) => a + b, 0);
 
   const trend = fulls.slice(-8).map((a, i) => ({
@@ -32,7 +37,8 @@ export default function Dashboard() {
   }));
 
   const attemptedIds = new Set(attempts.map((a) => a.mockId));
-  const nextMock = MOCKS.find((m) => m.kind === 'pyq' && !attemptedIds.has(m.id));
+  const { papers } = usePapers();
+  const nextMock = papers?.find((m) => !attemptedIds.has(m.id));
 
   // Weakest topics: in-progress or not-started topics with low practice in sections where scores lag
   const weak = ALL_TOPICS
@@ -80,6 +86,13 @@ export default function Dashboard() {
           <div className="stat-value">{s} <span className="faint" style={{ fontSize: 15, fontWeight: 500 }}>days</span></div>
           <div className="stat-sub">{Math.round(weekMin / 60)} h studied in the last 7 days</div>
         </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 18 }}>
+        <div className="card-head">
+          <div><h2>Effort this week</h2><p>Study time, consistency, mocks and revision over the last 7 days</p></div>
+        </div>
+        <EffortGauge score={effort.score} parts={effort.parts} delta={effort.score - lastWeekEffort.score} />
       </div>
 
       <div className="grid g-main" style={{ marginBottom: 18 }}>
@@ -151,12 +164,12 @@ export default function Dashboard() {
         </div>
 
         <div className="card">
-          <div className="card-head"><div><h2>Focus areas</h2><p>Least-practised open topics</p></div><Link to="/coverage" className="btn sm ghost">All <IconArrow /></Link></div>
+          <div className="card-head"><div><h2>Focus areas</h2><p>Open topics with the fewest solved questions</p></div><Link to="/coverage" className="btn sm ghost">All <IconArrow /></Link></div>
           <div className="list">
             {weak.map((t) => (
               <div className="row" key={t.id}>
                 <IconAlert width="16" style={{ color: 'var(--warn)', flex: 'none' }} />
-                <div className="grow"><div className="ellipsis" style={{ fontWeight: 500 }}>{t.name}</div><div className="small faint">{t.section} · {coverage[t.id]?.practiced ?? 0} Qs practised</div></div>
+                <div className="grow"><div className="ellipsis" style={{ fontWeight: 500 }}>{t.name}</div><div className="small faint">{t.section} · {coverage[t.id]?.practiced ?? 0} Qs solved</div></div>
                 <span className={`chip ${coverage[t.id]?.status === 1 ? 'warn' : ''}`}>{coverage[t.id]?.status === 1 ? 'In progress' : 'Not started'}</span>
               </div>
             ))}

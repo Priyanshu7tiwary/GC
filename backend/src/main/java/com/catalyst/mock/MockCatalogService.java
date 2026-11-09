@@ -73,10 +73,6 @@ public class MockCatalogService {
     @Transactional(readOnly = true)
     public MockPaper paper(UUID userId, String mockId) {
         Mock mock = require(userId, mockId);
-        if (mock.getKind() == MockKind.PREVIOUS_YEAR
-                && (mock.getQuestionIds() == null || mock.getQuestionIds().isEmpty())) {
-            throw new BadRequestException("This previous-year paper is available as a source PDF, not as an interactive question set.");
-        }
         var sections = resolver.resolve(mock).entrySet().stream()
                 .map(e -> new MockPaper.PaperSection(e.getKey(), e.getValue().stream().map(QuestionView::of).toList()))
                 .toList();

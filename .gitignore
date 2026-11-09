@@ -22,3 +22,6 @@ papers/
 .vscode/
 *.iml
 .DS_Store
+
+# browser-automation screenshots and logs
+.playwright-mcp/

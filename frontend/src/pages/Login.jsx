@@ -140,7 +140,7 @@ export default function Login() {
   return (
     <div className="auth">
       <section className="auth-hero">
-        <div className="brand" style={{ padding: 0 }}><div className="brand-mark">C</div>CATalyst</div>
+        <div className="brand" style={{ padding: 0 }}><img className="brand-logo" src="/brand/99ile-on-dark.png" alt="99ile" /></div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <h1>Your 99+ percentile, one deliberate day at a time.</h1>
           <p>Full-length mocks in the real CAT interface, a spaced-repetition revision tracker, and a syllabus map that shows exactly what's left.</p>

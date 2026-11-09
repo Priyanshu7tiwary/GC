@@ -1,4 +1,4 @@
-// Thin fetch wrapper for the CATalyst API.
+// Thin fetch wrapper for the 99ile API.
 // - The session lives in an HttpOnly cookie the browser sends automatically; this code never sees it.
 // - Every state-changing request echoes the XSRF-TOKEN cookie in the X-XSRF-TOKEN header (CSRF protection).
 
@@ -15,7 +15,22 @@ export class ApiError extends Error {
   }
 }
 
-export async function api(path, { method = 'GET', body } = {}) {
+// Number of requests in flight; the top loading bar listens for changes.
+let inFlight = 0;
+const busy = (d) => { inFlight += d; window.dispatchEvent(new CustomEvent('api-busy', { detail: inFlight })); };
+
+/** opts.quiet: don't show the top loading bar (for requests that show their own progress). */
+export async function api(path, opts = {}) {
+  if (opts.quiet) return request(path, opts);
+  busy(1);
+  try {
+    return await request(path, opts);
+  } finally {
+    busy(-1);
+  }
+}
+
+async function request(path, { method = 'GET', body } = {}) {
   const headers = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (method !== 'GET') {

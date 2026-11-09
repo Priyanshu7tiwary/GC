@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { ALL_TOPICS } from '../data/syllabus.js';
-import { estPercentile } from './percentile.js';
+import { practiceSummary } from './practice.js';
+import { enrollTopic, enrollTopics, fetchBoard, pauseTopic, resetTopic, reviewTopic, toEntry, toMap } from './revisions.js';
 
 const KEY = 'catalyst-state-v3';
 try { localStorage.removeItem(KEY); } catch { /* ignore */ }
@@ -14,73 +15,26 @@ export const today = () => {
 };
 export const daysBetween = (a, b) => Math.round((b - a) / DAY);
 
-// Deterministic pseudo-random so the demo data looks the same on every fresh load
-function rng(seed) {
-  let s = seed;
-  return () => ((s = (s * 16807) % 2147483647) - 1) / 2147483646;
-}
+const STATE_VERSION = 4; // 4: new accounts start empty (earlier versions were pre-filled with demo data)
 
-function seed() {
-  const r = rng(42);
-  const t = today();
-  const coverage = {};
-  const revisions = {};
-  ALL_TOPICS.forEach((tp) => {
-    const x = r();
-    const status = x < 0.48 ? 2 : x < 0.72 ? 1 : 0; // 0 not started, 1 in progress, 2 done
-    coverage[tp.id] = { status, practiced: status === 0 ? 0 : Math.floor(r() * 80) + (status === 2 ? 40 : 5) };
-    if (status === 2) {
-      const stage = Math.floor(r() * 4);
-      const last = t - Math.floor(r() * 10) * DAY;
-      const next = last + INTERVALS[stage] * DAY;
-      revisions[tp.id] = {
-        stage,
-        last,
-        next,
-        history: Array.from({ length: stage + 1 }, (_, k) => last - k * INTERVALS[Math.max(0, stage - k)] * DAY),
-      };
-    }
-  });
-
-  // Past mock attempts with an upward trend
-  const attempts = [
-    [1, 16, 13, 8, 9], [2, 21, 11, 6, 9], [3, 26, 10, 5, 7],
-    [4, 30, 8, 5, 6], [5, 41, 7, 4, 5], [6, 48, 5, 3, 4],
-  ].map(([n, ago, v, d, q]) => {
-    const score = v * 3 - Math.round(v / 4) + d * 3 - Math.round(d / 3) + q * 3 - Math.round(q / 3);
-    return {
-      id: `seed-${n}`,
-      mockId: `pyq-${2025 - n}-1`,
-      title: `CAT ${2025 - n} · Slot 1`,
-      date: t - ago * DAY,
-      score,
-      max: 204,
-      percentile: estPercentile(score / 204),
-      sections: {
-        VARC: { correct: v, wrong: Math.round(v / 4), unattempted: 24 - v - Math.round(v / 4), score: v * 3 - Math.round(v / 4) },
-        DILR: { correct: d, wrong: Math.round(d / 3), unattempted: 22 - d - Math.round(d / 3), score: d * 3 - Math.round(d / 3) },
-        QA: { correct: q, wrong: Math.round(q / 3), unattempted: 22 - q - Math.round(q / 3), score: q * 3 - Math.round(q / 3) },
-      },
-    };
-  }).reverse();
-
-  // Study activity per day for the last 16 weeks (minutes)
-  const activity = {};
-  for (let i = 0; i < 112; i++) {
-    const v = r();
-    activity[t - i * DAY] = i < 9 ? 60 + Math.floor(v * 180) : v < 0.2 ? 0 : Math.floor(v * 240);
-  }
-
+// A new account starts with nothing: no coverage, attempts or activity. All of it builds up from what this user does.
+function fresh() {
   return {
+    v: STATE_VERSION,
     examDate: catDate(2026),
     targetYear: 2026,
     targetPercentile: 99,
-    coverage,
-    revisions,
-    attempts,
-    activity,
+    coverage: {},
+    revisions: {}, // filled from the server (/api/revisions)
+    attempts: [],
+    activity: {},
     customMocks: [],
   };
+}
+
+/** The revision tracker only covers topics currently marked complete; uncovered topics never appear in it. */
+export function coveredOnly(revisions, coverage) {
+  return Object.fromEntries(Object.entries(revisions).filter(([id]) => coverage[id]?.status === 2));
 }
 
 // CAT is typically held on the last Sunday of November
@@ -95,12 +49,16 @@ function load(key) {
     const raw = localStorage.getItem(key);
     if (raw) {
       const st = JSON.parse(raw);
-      return { customMocks: [], targetYear: new Date(st.examDate).getFullYear(), ...st };
+      const base = { customMocks: [], targetYear: new Date(st.examDate).getFullYear(), ...st, revisions: {} };
+      if (st.v >= STATE_VERSION) return base;
+      // Saved by an older version that pre-filled demo coverage, mock attempts and study activity. Drop that made-up
+      // data (and anything built on it) and keep only what this user really did.
+      return { ...base, v: STATE_VERSION, coverage: {}, activity: {}, attempts: (st.attempts || []).filter((a) => !String(a.id).startsWith('seed-')) };
     }
   } catch {
     /* ignore */
   }
-  return seed();
+  return fresh();
 }
 
 const Ctx = createContext(null);
@@ -108,59 +66,150 @@ const Ctx = createContext(null);
 export function StoreProvider({ userId, children }) {
   const storageKey = `${KEY}:${userId}`;
   const [state, setState] = useState(() => load(storageKey));
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   useEffect(() => {
     try {
-      if (userId !== 'anonymous') localStorage.setItem(storageKey, JSON.stringify(state));
+      if (userId !== 'anonymous') localStorage.setItem(storageKey, JSON.stringify({ ...state, revisions: undefined }));
     } catch {
       /* ignore */
     }
   }, [state, storageKey, userId]);
+
+  // One snapshot a day of the revision backlog, so Analytics can show whether overdue topics are shrinking.
+  // Older history can't be reconstructed, so the trend starts the first day this runs.
+  useEffect(() => {
+    const { overdue, due } = revisionBuckets(coveredOnly(state.revisions, state.coverage));
+    const t = today();
+    const cur = state.revisionLog?.[t];
+    if (cur && cur.overdue === overdue.length && cur.due === due.length) return;
+    setState((s) => {
+      const log = { ...(s.revisionLog || {}), [t]: { overdue: overdue.length, due: due.length } };
+      const keep = Object.keys(log).map(Number).sort((a, b) => b - a).slice(0, 180);
+      return { ...s, revisionLog: Object.fromEntries(keep.map((k) => [k, log[k]])) };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.revisions, state.coverage]);
+
+  // ---- revision schedule: loaded from and changed on the server ----
+  const setRevision = useCallback((id, view) => setState((s) => ({ ...s, revisions: { ...s.revisions, [id]: toEntry(view) } })), []);
+
+  const refreshRevisions = useCallback(async () => {
+    if (userId === 'anonymous') return;
+    try {
+      const board = await fetchBoard();
+      setState((s) => ({ ...s, revisions: toMap(board.items), revisionsError: null }));
+    } catch (e) {
+      setState((s) => ({ ...s, revisionsError: e.message }));
+    }
+  }, [userId]);
+
+  // On sign-in: topics already marked learned in this browser are enrolled (idempotent), then the server's schedule
+  // is loaded. It is reloaded when the tab regains focus so a new day's due topics appear.
+  useEffect(() => {
+    if (userId === 'anonymous') return undefined;
+    let live = true;
+    (async () => {
+      try {
+        const board = await fetchBoard();
+        const onServer = new Set(board.items.map((v) => v.topicId));
+        const learned = Object.entries(state.coverage).filter(([id, c]) => c.status === 2 && !onServer.has(id)).map(([id]) => id);
+        for (let i = 0; i < learned.length; i += 200) await enrollTopics(learned.slice(i, i + 200));
+        // Only topics marked complete belong in the tracker. Any the server still holds as active for a topic that
+        // isn't complete (e.g. left over from older versions) are paused, keeping their history.
+        const cov = stateRef.current.coverage;
+        const stray = board.items.filter((v) => !v.paused && cov[v.topicId]?.status !== 2).map((v) => v.topicId);
+        for (const id of stray) await pauseTopic(id);
+        const fresh = learned.length || stray.length ? await fetchBoard() : board;
+        if (live) setState((s) => ({ ...s, revisions: toMap(fresh.items), revisionsError: null }));
+      } catch (e) {
+        if (live) setState((s) => ({ ...s, revisionsError: e.message }));
+      }
+    })();
+    const onFocus = () => refreshRevisions();
+    window.addEventListener('focus', onFocus);
+    const timer = setInterval(refreshRevisions, 30 * 60 * 1000);
+    return () => { live = false; window.removeEventListener('focus', onFocus); clearInterval(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  // ---- practised-question counters: the number of bank questions marked solved, kept on the server ----
+  const applyPractice = useCallback((summary) => setState((s) => ({
+    ...s,
+    coverage: Object.fromEntries(ALL_TOPICS.map((t) => {
+      const c = s.coverage[t.id] || { status: 0, practiced: 0 };
+      return [t.id, { ...c, practiced: summary[t.id]?.solved ?? 0 }];
+    })),
+  })), []);
+
+  const refreshPractice = useCallback(async () => {
+    if (userId === 'anonymous') return;
+    try { applyPractice(await practiceSummary()); } catch { /* keep the last known counts */ }
+  }, [userId, applyPractice]);
+
+  useEffect(() => {
+    if (userId === 'anonymous') return undefined;
+    refreshPractice();
+    window.addEventListener('focus', refreshPractice);
+    return () => window.removeEventListener('focus', refreshPractice);
+  }, [userId, refreshPractice]);
 
   const logStudy = (s, minutes) => {
     const t = today();
     return { ...s.activity, [t]: (s.activity[t] || 0) + minutes };
   };
 
-  const resetDemo = useCallback(() => setState(() => seed()), []);
+  const resetDemo = useCallback(() => setState(() => fresh()), []);
   const updateSettings = useCallback((patch) => setState((s) => ({ ...s, ...patch })), []);
 
-  const setCoverage = useCallback((id, patch) =>
-    setState((s) => {
-      const prev = s.coverage[id] || { status: 0, practiced: 0 };
-      const next = { ...prev, ...patch };
-      const revisions = { ...s.revisions };
-      // Completing a topic enrols it into the revision schedule
-      if (next.status === 2 && !revisions[id]) {
-        const t = today();
-        revisions[id] = { stage: 0, last: t, next: t + INTERVALS[0] * DAY, history: [t] };
-      }
-      if (next.status !== 2 && revisions[id] && prev.status === 2) delete revisions[id];
-      return { ...s, coverage: { ...s.coverage, [id]: next }, revisions };
-    }), []);
+  // Marking a topic learned enrols it on the server (first review tomorrow; idempotent, never resets progress).
+  // Reopening it pauses the schedule, keeping its stage and history.
+  const setCoverage = useCallback((id, patch) => {
+    const cur = stateRef.current;
+    const prev = cur.coverage[id] || { status: 0, practiced: 0 };
+    const nextStatus = patch.status ?? prev.status;
+    const change = nextStatus === 2 && prev.status !== 2 ? 'enroll'
+      : nextStatus !== 2 && prev.status === 2 && cur.revisions[id] ? 'pause' : null;
+    setState((s) => ({ ...s, coverage: { ...s.coverage, [id]: { ...(s.coverage[id] || { status: 0, practiced: 0 }), ...patch } } }));
+    if (change === 'enroll') enrollTopic(id).then((v) => setRevision(id, v), () => refreshRevisions());
+    if (change === 'pause') pauseTopic(id).then((v) => setRevision(id, v), () => refreshRevisions());
+  }, [setRevision, refreshRevisions]);
 
-  // rating: 'hard' | 'ok' | 'easy'
-  const reviseTopic = useCallback((id, rating) =>
-    setState((s) => {
-      const t = today();
-      const cur = s.revisions[id] || { stage: 0, history: [] };
-      const stage = rating === 'hard' ? 0 : rating === 'easy' ? Math.min(cur.stage + 2, INTERVALS.length - 1) : Math.min(cur.stage + 1, INTERVALS.length - 1);
-      return {
-        ...s,
-        revisions: { ...s.revisions, [id]: { stage, last: t, next: t + INTERVALS[stage] * DAY, history: [t, ...cur.history] } },
-        activity: logStudy(s, 15),
-      };
-    }), []);
+  /** Records a Hard / Good / Easy review (rating: 'hard' | 'ok' | 'easy'). Resolves to { outcome, message }. */
+  const reviseTopic = useCallback(async (id, rating) => {
+    const result = await reviewTopic(id, rating);
+    setState((s) => ({
+      ...s,
+      revisions: { ...s.revisions, [id]: toEntry(result.item) },
+      activity: result.outcome === 'DUPLICATE_REQUEST' ? s.activity : logStudy(s, 15),
+    }));
+    return result;
+  }, []);
+
+  /** Adds a topic to the schedule (or resumes a paused one). */
+  const scheduleTopic = useCallback(async (id) => setRevision(id, await enrollTopic(id)), [setRevision]);
+
+  /** Explicitly restarts a topic at the first rung (history is kept on the server). */
+  const restartTopic = useCallback(async (id) => setRevision(id, await resetTopic(id)), [setRevision]);
+
+  /** Adds study minutes to today (e.g. for practice questions solved). */
+  const logMinutes = useCallback((minutes) => setState((s) => ({ ...s, activity: logStudy(s, minutes) })), []);
 
   const addAttempt = useCallback((attempt) =>
     setState((s) => ({ ...s, attempts: [...s.attempts, attempt], activity: logStudy(s, Math.round(attempt.timeSpent / 60) || 1) })), []);
 
+  // Used after an admin corrects an answer key, to rescore an attempt with the new key.
+  const updateAttempt = useCallback((id, patch) =>
+    setState((s) => ({ ...s, attempts: s.attempts.map((a) => (a.id === id ? { ...a, ...patch } : a)) })), []);
   const addCustomMock = useCallback((m) => setState((s) => ({ ...s, customMocks: [m, ...s.customMocks] })), []);
   const removeCustomMock = useCallback((id) => setState((s) => ({ ...s, customMocks: s.customMocks.filter((m) => m.id !== id) })), []);
+  // Generated mocks live on the server; keep the local list in step with it (older browser-only mocks stay).
+  const syncServerMocks = useCallback((list) => setState((s) => ({ ...s, customMocks: [...list, ...s.customMocks.filter((m) => m.source !== 'server')] })), []);
 
   const value = useMemo(
-    () => ({ ...state, resetDemo, updateSettings, setCoverage, reviseTopic, addAttempt, addCustomMock, removeCustomMock }),
-    [state, resetDemo, updateSettings, setCoverage, reviseTopic, addAttempt, addCustomMock, removeCustomMock],
+    () => ({ ...state, revisions: coveredOnly(state.revisions, state.coverage), resetDemo, updateSettings, setCoverage, reviseTopic, scheduleTopic, restartTopic, refreshRevisions, refreshPractice, logMinutes, addAttempt, updateAttempt, addCustomMock, removeCustomMock, syncServerMocks }),
+    [state, resetDemo, updateSettings, setCoverage, reviseTopic, scheduleTopic, restartTopic, refreshRevisions, refreshPractice, logMinutes, addAttempt, updateAttempt, addCustomMock, removeCustomMock, syncServerMocks],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -179,16 +228,17 @@ export function coverageStats(coverage, topics = ALL_TOPICS) {
   return { total, done, prog, pct: total ? Math.round(((done + prog * 0.5) / total) * 100) : 0 };
 }
 
+/** Splits the schedule into overdue / due today / upcoming using the server's day counts. Paused topics are left out. */
 export function revisionBuckets(revisions) {
-  const t = today();
   const overdue = [], due = [], upcoming = [];
   Object.entries(revisions).forEach(([id, r]) => {
-    const d = daysBetween(t, r.next);
+    if (r.paused) return;
+    const d = r.delta ?? daysBetween(today(), r.next);
     if (d < 0) overdue.push({ id, ...r, delta: d });
     else if (d === 0) due.push({ id, ...r, delta: d });
     else upcoming.push({ id, ...r, delta: d });
   });
-  const byNext = (a, b) => a.next - b.next;
+  const byNext = (a, b) => a.delta - b.delta;
   return { overdue: overdue.sort(byNext), due: due.sort(byNext), upcoming: upcoming.sort(byNext) };
 }
 

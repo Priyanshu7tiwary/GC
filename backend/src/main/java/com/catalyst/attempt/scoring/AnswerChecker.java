@@ -21,6 +21,7 @@ public class AnswerChecker {
     }
 
     public Outcome check(Question q, String response) {
+        if (!q.isScored()) return Outcome.UNSCORED;
         if (response == null || response.isBlank()) return Outcome.SKIPPED;
         return evaluators.get(q.getType()).isCorrect(q, response) ? Outcome.CORRECT : Outcome.WRONG;
     }

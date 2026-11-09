@@ -26,11 +26,11 @@ class EmailOtpSender implements OtpSender {
         SimpleMailMessage msg = new SimpleMailMessage();
         msg.setFrom(from);
         msg.setTo(email);
-        msg.setSubject(code + " is your CATalyst " + (purpose == OtpPurpose.SIGN_UP ? "verification" : "sign-in") + " code");
+        msg.setSubject(code + " is your 99ile " + (purpose == OtpPurpose.SIGN_UP ? "verification" : "sign-in") + " code");
         msg.setText("""
                 Hi %s,
 
-                Your CATalyst %s code is:
+                Your 99ile %s code is:
 
                     %s
 

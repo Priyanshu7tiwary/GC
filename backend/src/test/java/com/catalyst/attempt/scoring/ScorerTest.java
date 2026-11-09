@@ -37,6 +37,22 @@ class ScorerTest {
     }
 
     @Test
+    void questionsWithoutAVerifiedKeyAreNeitherScoredNorCounted() {
+        Map<Section, List<Question>> paper = new LinkedHashMap<>();
+        paper.put(Section.QA, List.of(
+                q("k1", Section.QA, QuestionType.MCQ, "1"),     // correct +3
+                q("u1", Section.QA, QuestionType.MCQ, null),    // no key: answered, still 0
+                q("u2", Section.QA, QuestionType.TITA, null))); // no key: skipped
+        ScoreCard card = scorer.score(paper, Map.of("k1", "1", "u1", "0"), Map.of());
+
+        assertThat(card.score()).isEqualTo(3);
+        assertThat(card.maxScore()).isEqualTo(3);
+        SectionResult qa = card.sections().get(Section.QA);
+        assertThat(qa.correct() + qa.wrong() + qa.unattempted()).isEqualTo(1);
+        assertThat(card.outcomes()).containsEntry("u1", Outcome.UNSCORED).containsEntry("u2", Outcome.UNSCORED);
+    }
+
+    @Test
     void titaComparesNumbersByValueAndSequencesAsText() {
         assertThat(checker.check(q("a", Section.QA, QuestionType.TITA, "48"), "48.0")).isEqualTo(Outcome.CORRECT);
         assertThat(checker.check(q("b", Section.VARC, QuestionType.TITA, "2413"), " 2413 ")).isEqualTo(Outcome.CORRECT);

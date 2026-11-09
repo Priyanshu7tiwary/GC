@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { practiceSummary } from '../lib/practice.js';
 import { useStore, coverageStats } from '../lib/store.jsx';
 import { SYLLABUS, SECTIONS, ALL_TOPICS, topicId } from '../data/syllabus.js';
 import { Ring, SegBar } from '../components/Charts.jsx';
@@ -15,6 +17,8 @@ export default function Coverage() {
   const [active, setActive] = useState('QA');
   const [statusFilter, setStatusFilter] = useState('all');
   const [open, setOpen] = useState({});
+  const [bank, setBank] = useState({}); // topicId -> { questions, keyed, solved, marked } from the question bank
+  useEffect(() => { practiceSummary().then(setBank, () => {}); }, []);
   const overall = coverageStats(coverage);
   const totalQs = Object.values(coverage).reduce((a, c) => a + (c.practiced || 0), 0);
   const sec = SYLLABUS.find((s) => s.section === active);
@@ -31,7 +35,7 @@ export default function Coverage() {
       <div className="grid g-4" style={{ marginBottom: 18 }}>
         <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <Ring value={overall.pct} />
-          <div><div className="stat-label">Overall</div><div className="stat-sub">{overall.done} of {overall.total} topics done</div><div className="stat-sub">{totalQs.toLocaleString('en-IN')} questions practised</div></div>
+          <div><div className="stat-label">Overall</div><div className="stat-sub">{overall.done} of {overall.total} topics done</div><div className="stat-sub">{totalQs.toLocaleString('en-IN')} questions solved</div></div>
         </div>
         {Object.values(SECTIONS).map((s) => {
           const st = coverageStats(coverage, ALL_TOPICS.filter((t) => t.section === s.id));
@@ -53,7 +57,7 @@ export default function Coverage() {
         <div className="card-head" style={{ flexWrap: 'wrap' }}>
           <div>
             <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}><i className="dot" style={{ background: SECTIONS[active].color }} />{SECTIONS[active].name}</h2>
-            <p>Click a status to cycle it · log practised questions per topic</p>
+            <p>Click a status to cycle it · open a topic's questions and mark the ones you solve</p>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <div className="tabs">
@@ -102,12 +106,15 @@ export default function Coverage() {
                             </button>
                             <div className="grow" style={{ minWidth: 160 }}>
                               <div style={{ fontWeight: 500, textDecoration: c.status === 2 ? 'none' : 'none' }}>{t.name}</div>
-                              <div className="small faint">{c.practiced} questions practised</div>
+                              <div className="small faint">
+                                {c.practiced} question{c.practiced === 1 ? '' : 's'} solved
+                                {bank[t.id] && <> of {bank[t.id].questions}{bank[t.id].marked ? ` · ${bank[t.id].marked} marked for revision` : ''}</>}
+                              </div>
                             </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                              <button className="btn sm ghost" onClick={() => setCoverage(t.id, { practiced: Math.max(0, c.practiced - 10) })} aria-label="Remove 10">−10</button>
-                              <button className="btn sm" onClick={() => setCoverage(t.id, { practiced: c.practiced + 10, status: Math.max(c.status, 1) })}>+10 Qs</button>
-                            </div>
+                            <Link className="btn sm primary" to={`/practice/${encodeURIComponent(t.id)}`}
+                              title={bank[t.id] ? `${bank[t.id].questions} questions in this topic's bank` : 'Practise this topic'}>
+                              Practice{bank[t.id] ? ` (${bank[t.id].questions})` : ''}
+                            </Link>
                             <button className={`chip ${S.cls}`} style={{ border: 0, minWidth: 96, justifyContent: 'center' }}
                               onClick={() => setCoverage(t.id, { status: (c.status + 1) % 3 })} title="Click to change status">
                               {S.label}

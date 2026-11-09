@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useStore } from '../lib/store.jsx';
-import { findMock, SECTION_MINUTES } from '../data/mocks.js';
+import { SECTION_MINUTES } from '../data/mocks.js';
+import { useMock } from '../lib/catalog.js';
 import { SECTIONS } from '../data/syllabus.js';
 import MockScopePicker, { Check, scopeSections, scopeValid } from '../components/MockScopePicker.jsx';
 import { IconClock, IconTest } from '../components/Icons.jsx';
@@ -11,23 +12,33 @@ const STANDARD_QS = { VARC: 24, DILR: 22, QA: 22 };
 
 export default function MockSetup() {
   const { mockId } = useParams();
+  return <MockGate mockId={mockId}>{(mock) => <Setup key={mock.id} mock={mock} />}</MockGate>;
+}
+
+/** Waits for the mock (previous-year papers come from the API), then mounts the page with it. */
+function MockGate({ mockId, children }) {
+  const { customMocks } = useStore();
+  const { mock, loading, error } = useMock(mockId, customMocks);
+  if (!mock) {
+    return (
+      <div className="page"><div className="card">
+        {loading ? <div className="loading-card" role="status"><span className="ring" /><span>Loading the test…</span></div>
+          : <><h1>Test not found</h1>{error && <p className="muted">Couldn’t load the list of tests: {error.message}</p>}
+            <Link to="/mocks" className="btn" style={{ marginTop: 16 }}>Back to mock tests</Link></>}
+      </div></div>
+    );
+  }
+  return children(mock);
+}
+
+function Setup({ mock }) {
   const nav = useNavigate();
-  const { customMocks, attempts } = useStore();
-  const mock = findMock(mockId, customMocks);
+  const { attempts } = useStore();
 
   const available = mock ? ORDER.filter((s) => mock.sections.includes(s)) : [];
   const [scope, setScope] = useState(() =>
     available.length === 3 ? { type: 'full', subjects: [] } : { type: 'sectional', subjects: available });
   const [strict, setStrict] = useState(true);
-
-  if (!mock) {
-    return (
-      <div className="page">
-        <h1>Test not found</h1>
-        <Link to="/mocks" className="btn" style={{ marginTop: 16 }}>Back to mock tests</Link>
-      </div>
-    );
-  }
 
   const counts = mock.sectionQs || STANDARD_QS;
   const secMin = mock.sectionMinutes || SECTION_MINUTES;

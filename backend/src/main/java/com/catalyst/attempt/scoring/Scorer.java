@@ -29,12 +29,14 @@ public class Scorer {
             for (Question q : entry.getValue()) {
                 Outcome o = checker.check(q, responses.get(q.getId()));
                 outcomes.put(q.getId(), o);
+                if (o == Outcome.UNSCORED) continue;
                 score += marking.marks(q.getType(), o);
                 secMax += marking.correct(q.getType());
                 switch (o) {
                     case CORRECT -> correct++;
                     case WRONG -> wrong++;
                     case SKIPPED -> skipped++;
+                    case UNSCORED -> { }
                 }
             }
             sections.put(entry.getKey(), new SectionResult(correct, wrong, skipped, score, secMax,

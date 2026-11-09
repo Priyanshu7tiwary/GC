@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.catalyst.user.AdminPolicy;
 import java.time.Clock;
 import java.time.LocalDate;
 
@@ -40,9 +41,11 @@ class AuthController {
     private final TokenService tokens;
     private final SessionCookie cookie;
     private final Clock clock;
+    private final AdminPolicy admins;
 
-    AuthController(AuthService auth, OtpService otp, TokenService tokens, SessionCookie cookie, Clock clock) {
+    AuthController(AuthService auth, OtpService otp, TokenService tokens, SessionCookie cookie, Clock clock, AdminPolicy admins) {
         this.auth = auth;
+        this.admins = admins;
         this.otp = otp;
         this.tokens = tokens;
         this.cookie = cookie;
@@ -54,7 +57,7 @@ class AuthController {
         var providers = new SessionResponse.Providers(true, auth.googleClientId());
         if (me == null) return new SessionResponse(false, null, providers);
         return auth.find(me.id())
-                .map(u -> new SessionResponse(true, ProfileResponse.of(u, LocalDate.now(clock)), providers))
+                .map(u -> new SessionResponse(true, ProfileResponse.of(u, LocalDate.now(clock), admins.isAdmin(u)), providers))
                 .orElseGet(() -> new SessionResponse(false, null, providers));
     }
 
@@ -99,6 +102,6 @@ class AuthController {
     private ProfileResponse start(User user, HttpServletResponse res) {
         String token = tokens.issue(new AuthenticatedUser(user.getId(), user.getEmail(), user.getSessionVersion()));
         cookie.write(res, token, tokens.ttl());
-        return ProfileResponse.of(user, LocalDate.now(clock));
+        return ProfileResponse.of(user, LocalDate.now(clock), admins.isAdmin(user));
     }
 }

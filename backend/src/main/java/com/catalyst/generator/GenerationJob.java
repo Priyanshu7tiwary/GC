@@ -88,4 +88,11 @@ public class GenerationJob {
     public String getResultMockId() { return resultMockId; }
     public String getError() { return error; }
     public Instant getCreatedAt() { return createdAt; }
+    public Instant getUpdatedAt() { return updatedAt; }
+
+    /** Index of the step that was running, or -1. */
+    int runningStep() {
+        for (int i = 0; i < steps.size(); i++) if (steps.get(i).status() == StepState.Status.RUNNING) return i;
+        return -1;
+    }
 }

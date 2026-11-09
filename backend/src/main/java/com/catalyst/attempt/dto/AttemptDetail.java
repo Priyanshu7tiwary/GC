@@ -10,5 +10,5 @@ import java.util.List;
 public record AttemptDetail(AttemptSummary summary, List<Solution> solutions) {
     public record Solution(String questionId, Section section, String topic, QuestionType type, String prompt,
                            String passage, List<String> options, String correctAnswer, String response,
-                           Outcome outcome, int marks, String explanation) {}
+                           Outcome outcome, int marks, String explanation, boolean corrected) {}
 }

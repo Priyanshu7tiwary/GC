@@ -7,6 +7,8 @@ import com.catalyst.generator.GenerationStep;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+
 @Component
 @Order(10)
 class ProfileAnalysisStep implements GenerationStep {
@@ -23,7 +25,9 @@ class ProfileAnalysisStep implements GenerationStep {
     @Override
     public String execute(GenerationContext ctx) {
         if (!ctx.request().focusWeakTopics()) return "Weak-topic focus off — balanced mix";
-        ctx.weakTopics(weakTopics.find(ctx.userId(), ctx.sections(), 6).stream().map(TopicCoverage::name).toList());
+        List<String> fromClient = ctx.request().focusTopics();
+        ctx.weakTopics(fromClient != null && !fromClient.isEmpty() ? fromClient
+                : weakTopics.find(ctx.userId(), ctx.sections(), 6).stream().map(TopicCoverage::name).toList());
         return ctx.weakTopics().size() + " weak topics found";
     }
 }

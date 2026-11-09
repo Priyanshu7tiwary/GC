@@ -1,71 +1,136 @@
-// AI mock generator workflow.
-// Each step is a stage of the pipeline. Today they run locally against the demo
-// question bank; replace `run` bodies with real API calls (e.g. a backend
-// endpoint that prompts an LLM) without touching the UI.
-
-import { QUESTIONS } from '../data/questions.js';
+// AI mock generation runs on the server: POST /api/mocks/custom starts a job, and the job's steps are polled
+// until it succeeds. The server draws questions from every keyed question in the database (official CAT papers,
+// the practice bank and admin imports) and, when an Anthropic API key is configured, adds a few new questions
+// drafted by Claude that pass an independent solve.
+//
+// Generated mocks are played and scored through the API, so their answer keys never reach the browser before submit.
+import { api } from './api.js';
+import { fromServer } from './catalog.js';
 import { ALL_TOPICS } from '../data/syllabus.js';
 
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+/** Questions per section in a generated mock (the server's app.generator.questions-per-section). */
+export const QUESTIONS_PER_SECTION = 22;
+export const SECTION_QS = { VARC: QUESTIONS_PER_SECTION, DILR: QUESTIONS_PER_SECTION, QA: QUESTIONS_PER_SECTION };
 
-export const SECTION_QS = { VARC: 24, DILR: 22, QA: 22 };
-
+// Mirrors the server pipeline (generator/steps); the server sends the live state of each step.
 export const WORKFLOW = [
-  { id: 'profile', label: 'Analysing your performance', detail: 'Reading past attempts & coverage to find weak areas' },
-  { id: 'blueprint', label: 'Building the test blueprint', detail: 'Choosing topic mix and difficulty curve per section' },
-  { id: 'generate', label: 'Generating questions', detail: 'Drafting passages, sets and questions' },
+  { id: 'profile', label: 'Analysing your performance', detail: 'Reading your coverage to find weak areas' },
+  { id: 'blueprint', label: 'Building the test blueprint', detail: `${QUESTIONS_PER_SECTION} per section, spread over chapters and topics like recent CAT papers` },
+  { id: 'generate', label: 'Generating questions', detail: 'Picking whole sets and a question for every planned topic' },
   { id: 'validate', label: 'Validating answers', detail: 'Solving each question independently to verify the key' },
   { id: 'assemble', label: 'Assembling your mock', detail: 'Ordering sections, timing and marking scheme' },
 ];
 
+const DIFFICULTY = { Easy: 'EASY', Moderate: 'MODERATE', Hard: 'HARD', 'CAT-level': 'CAT_LEVEL', Adaptive: 'ADAPTIVE' };
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** A generated mock in the shape the rest of the app uses for mocks. */
+export const toLocalMock = (m) => ({ ...fromServer(m), kind: 'custom', createdAt: m.createdAt ? Date.parse(m.createdAt) : Date.now() });
+
 /**
  * @param {{type:'full'|'sectional', sections:string[], difficulty:string, focusWeak:boolean, timed:boolean}} config
- * @param {{coverage:object}} ctx  user state used for personalisation
- * @param {(stepId:string, info?:string)=>void} onStep progress callback
+ * @param {{coverage:object}} ctx  learner state used for personalisation (coverage lives in the browser)
+ * @param {(steps: object[]) => void} onSteps  receives the server's step list on every poll
  */
-export async function generateMock(config, ctx, onStep) {
+export async function generateMock(config, ctx, onSteps) {
   const sections = config.type === 'full' ? ['VARC', 'DILR', 'QA'] : config.sections;
-
-  onStep('profile');
-  await wait(700);
   const weak = ALL_TOPICS.filter((t) => sections.includes(t.section) && (ctx.coverage[t.id]?.status ?? 0) < 2)
     .sort((a, b) => (ctx.coverage[a.id]?.practiced ?? 0) - (ctx.coverage[b.id]?.practiced ?? 0))
-    .slice(0, 6);
-  onStep('profile', `${weak.length} weak topics found`);
+    .slice(0, 8)
+    .map((t) => t.name);
 
-  onStep('blueprint');
-  await wait(800);
-  const blueprint = Object.fromEntries(sections.map((s) => [s, SECTION_QS[s]]));
-
-  onStep('generate');
-  await wait(1200);
-  // Demo: draw from the local bank. Weak-topic questions first when requested.
-  const weakNames = new Set(weak.map((w) => w.name));
-  const questionIds = sections.flatMap((s) => {
-    const pool = QUESTIONS.filter((q) => q.section === s);
-    return (config.focusWeak ? [...pool].sort((a, b) => weakNames.has(b.topic) - weakNames.has(a.topic)) : pool).map((q) => q.id);
+  let job = await api('/api/mocks/custom', {
+    method: 'POST',
+    body: {
+      type: config.type === 'full' ? 'FULL' : 'SECTIONAL',
+      sections,
+      difficulty: DIFFICULTY[config.difficulty] || 'CAT_LEVEL',
+      focusWeakTopics: config.focusWeak,
+      strictTiming: config.timed,
+      focusTopics: config.focusWeak ? weak : [],
+    },
   });
+  onSteps(job.steps);
+  const deadline = Date.now() + 10 * 60 * 1000; // AI drafting can take a few minutes
+  while (job.status !== 'SUCCEEDED') {
+    if (job.status === 'FAILED') throw new Error(job.error || 'Generation failed.');
+    if (Date.now() > deadline) throw new Error('Generation is taking too long. Check “Your generated mocks” again in a few minutes.');
+    await wait(1000);
+    job = await api(`/api/generation-jobs/${job.id}`);
+    onSteps(job.steps);
+  }
+  return toLocalMock(await api(`/api/mocks/${job.resultMockId}`));
+}
 
-  onStep('validate');
-  await wait(900);
+export const listServerMocks = async () => (await api('/api/mocks?kind=CUSTOM')).map(toLocalMock);
+export const deleteServerMock = (id) => api(`/api/mocks/${encodeURIComponent(id)}`, { method: 'DELETE' });
 
-  onStep('assemble');
-  await wait(500);
+/** The questions of a generated mock, without answer keys. */
+export async function loadServerPaper(mockId) {
+  const paper = await api(`/api/mocks/${encodeURIComponent(mockId)}/paper`);
+  return paper.sections.flatMap((s) => s.questions.map((q) => ({
+    id: q.id,
+    section: q.section,
+    topic: q.topic,
+    type: q.type === 'MCQ' ? 'mcq' : 'tita',
+    q: q.prompt,
+    passage: q.passage,
+    options: q.options || [],
+    figure: q.hasFigure,
+    scored: q.scored,
+  })));
+}
 
-  const n = Date.now();
-  const sectionMinutes = config.timed ? 40 : 60;
+/** Scores an attempt on the server and returns it in the local attempt shape (plus the server's attempt id). */
+export async function submitServerAttempt(mock, sections, answers, timeBySection) {
+  const detail = await api(`/api/mocks/${encodeURIComponent(mock.id)}/attempts`, {
+    method: 'POST',
+    body: {
+      answers: Object.fromEntries(Object.entries(answers).map(([k, v]) => [k, String(v)])),
+      sectionSeconds: Object.fromEntries(sections.map((s) => [s, timeBySection[s] || 0])),
+      sections,
+    },
+  });
+  const s = detail.summary;
   return {
-    id: `custom-${n}`,
-    kind: 'custom',
-    title: config.type === 'full' ? 'AI Full Mock' : `AI ${sections.join(' + ')} Sectional`,
-    subtitle: `${config.difficulty}${config.focusWeak ? ' · weak-area focus' : ''}`,
-    sections,
-    questions: Object.values(blueprint).reduce((a, b) => a + b, 0),
-    sectionMinutes,
-    minutes: sectionMinutes * sections.length,
-    difficulty: config.difficulty,
-    focusTopics: weak.map((w) => w.name),
-    questionIds,
-    createdAt: n,
+    serverAttemptId: s.id,
+    score: s.score,
+    max: s.maxScore,
+    percentile: s.percentile ?? undefined,
+    sections: Object.fromEntries(Object.entries(s.sections).map(([k, r]) => [k, {
+      correct: r.correct, wrong: r.wrong, unattempted: r.unattempted, score: r.score, time: r.timeSeconds,
+    }])),
+    questionIds: detail.solutions.map((x) => x.questionId),
   };
+}
+
+/** Questions with keys and explanations for a server-scored attempt (for the result page). */
+export async function loadServerSolutions(serverAttemptId) {
+  return (await loadServerAttempt(serverAttemptId)).questions;
+}
+
+/** A server-scored attempt: { questions (with keys and explanations), summary } where summary is in the local attempt shape. */
+export async function loadServerAttempt(serverAttemptId) {
+  const detail = await api(`/api/attempts/${encodeURIComponent(serverAttemptId)}`);
+  const s = detail.summary;
+  const summary = {
+    score: s.score,
+    max: s.maxScore,
+    percentile: s.percentile ?? undefined,
+    sections: Object.fromEntries(Object.entries(s.sections).map(([k, r]) => [k, {
+      correct: r.correct, wrong: r.wrong, unattempted: r.unattempted, score: r.score, time: r.timeSeconds,
+    }])),
+  };
+  return { summary, questions: detail.solutions.map((x) => ({
+    id: x.questionId,
+    section: x.section,
+    topic: x.topic,
+    type: x.type === 'MCQ' ? 'mcq' : 'tita',
+    q: x.prompt,
+    passage: x.passage,
+    options: x.options || [],
+    answer: x.correctAnswer == null ? null : x.type === 'MCQ' ? Number(x.correctAnswer) : x.correctAnswer,
+    explanation: x.explanation,
+    corrected: !!x.corrected,
+  })) };
 }

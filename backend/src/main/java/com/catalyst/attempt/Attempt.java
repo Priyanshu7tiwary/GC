@@ -66,6 +66,14 @@ public class Attempt {
         this.questionIds = questionIds;
     }
 
+    /** New totals after an answer key in this paper was corrected. The learner's answers never change. */
+    public void rescored(int score, int maxScore, Double percentile, Map<Section, SectionResult> sectionResults) {
+        this.score = score;
+        this.maxScore = maxScore;
+        this.percentile = percentile;
+        this.sectionResults = sectionResults;
+    }
+
     public UUID getId() { return id; }
     public UUID getUserId() { return userId; }
     public String getMockId() { return mockId; }

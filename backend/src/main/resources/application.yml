@@ -2,7 +2,8 @@ spring:
   application:
     name: catalyst-api
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/catalyst}
+    # either a full JDBC URL in DB_URL, or the parts (handy on hosts like Render that hand out host/port/name separately)
+    url: ${DB_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:catalyst}${DB_PARAMS:}}
     username: ${DB_USER:catalyst}
     password: ${DB_PASSWORD}
   jpa:
@@ -60,7 +61,7 @@ app:
     # keep true outside plain-http local testing; browsers accept Secure cookies on http://localhost
     secure: ${COOKIE_SECURE:true}
   mail:
-    from: ${MAIL_FROM:CATalyst <no-reply@catalyst.local>}
+    from: ${MAIL_FROM:99ile <no-reply@99ile.local>}
   google:
     # OAuth 2.0 Web client ID from Google Cloud Console; leave empty to hide Google sign-in
     client-id: ${GOOGLE_CLIENT_ID:}
@@ -69,6 +70,25 @@ app:
     allowed-origins: ${CORS_ORIGINS:}
   exam:
     default-target-percentile: 99
+  generator:
+    # questions per section in an AI-generated mock
+    questions-per-section: ${GENERATOR_QUESTIONS_PER_SECTION:22}
+    # brand-new questions Claude drafts per QA / VARC section (needs ANTHROPIC_API_KEY); 0 turns drafting off
+    ai-questions-per-section: ${GENERATOR_AI_QUESTIONS_PER_SECTION:3}
+  suggestion-ai:
+    # Any OpenAI-compatible chat API. Default: Groq's free tier, which serves open-weight models such as OpenAI's gpt-oss
+    # (key from https://console.groq.com/keys). Leave the key empty to keep the built-in rule-based suggestions.
+    api-key: ${AI_API_KEY:}
+    base-url: ${AI_BASE_URL:https://api.groq.com/openai/v1}
+    model: ${AI_MODEL:openai/gpt-oss-120b}
+    # AI plans one learner may generate per rolling 7 days
+    weekly-limit: ${AI_WEEKLY_LIMIT:3}
+  ai:
+    # Anthropic API key; leave empty to build mocks from the stored question pool only
+    api-key: ${ANTHROPIC_API_KEY:}
+    model: ${ANTHROPIC_MODEL:claude-opus-5-5}
+  # comma-separated verified emails that may correct answer keys (in addition to users.is_admin)
+  admin-emails: ${ADMIN_EMAILS:}
 
 management:
   endpoints.web.exposure.include: health

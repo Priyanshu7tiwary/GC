@@ -1,0 +1,64 @@
+# Render Blueprint for the CATalyst API + Postgres. The frontend runs on Vercel (frontend/vercel.json) and
+# proxies /api/* to this service, so the browser only ever talks to the Vercel domain.
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repo. Fill in the "sync: false" values when prompted.
+
+databases:
+  - name: catalyst-db
+    databaseName: catalyst
+    user: catalyst
+    plan: free
+    ipAllowList: []          # reachable only from Render services in the same region
+
+services:
+  - type: web
+    name: catalyst-api       # gives https://catalyst-api.onrender.com; if Render picks another name, update frontend/vercel.json
+    runtime: docker
+    plan: free
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    healthCheckPath: /actuator/health/readiness
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: DB_HOST
+        fromDatabase: { name: catalyst-db, property: host }
+      - key: DB_PORT
+        fromDatabase: { name: catalyst-db, property: port }
+      - key: DB_NAME
+        fromDatabase: { name: catalyst-db, property: database }
+      - key: DB_USER
+        fromDatabase: { name: catalyst-db, property: user }
+      - key: DB_PASSWORD
+        fromDatabase: { name: catalyst-db, property: password }
+      - key: JWT_SECRET
+        generateValue: true
+      - key: COOKIE_SECURE
+        value: "true"
+      # The Vercel site's origin(s), comma-separated, e.g. https://catalyst.vercel.app
+      - key: CORS_ORIGINS
+        sync: false
+      # Requests arrive via Vercel, whose proxy IPs aren't fixed. Trust X-Forwarded-For (Vercel overwrites it with
+      # the real client IP) so the sign-in rate limits are per user rather than per Vercel edge node.
+      - key: SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES
+        value: ".*"
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      # Real email for sign-in codes (e.g. Brevo, Resend, SendGrid). Leave SMTP_HOST empty to log codes instead.
+      # Render's free tier blocks ports 25/465/587, so use 2525 there.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "2525"
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_AUTH
+        value: "true"
+      - key: SMTP_STARTTLS
+        value: "true"
+      - key: MAIL_FROM
+        sync: false
+      - key: API_DOCS_ENABLED
+        value: "false"

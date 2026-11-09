@@ -52,12 +52,6 @@ public class Mock {
     private List<String> focusTopics;
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
-    @Column(name = "paper_asset_path")
-    private String paperAssetPath;
-    @Column(name = "paper_source_url")
-    private String paperSourceUrl;
-    @Column(name = "paper_source_status")
-    private String paperSourceStatus;
 
     protected Mock() {}
 
@@ -100,7 +94,4 @@ public class Mock {
     public List<String> getQuestionIds() { return questionIds; }
     public List<String> getFocusTopics() { return focusTopics; }
     public Instant getCreatedAt() { return createdAt; }
-    public String getPaperAssetPath() { return paperAssetPath; }
-    public String getPaperSourceUrl() { return paperSourceUrl; }
-    public String getPaperSourceStatus() { return paperSourceStatus; }
 }

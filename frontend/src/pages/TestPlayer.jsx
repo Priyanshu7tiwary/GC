@@ -1,25 +1,47 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { findMock, SECTION_MINUTES } from '../data/mocks.js';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { SECTION_MINUTES } from '../data/mocks.js';
+import { useMock } from '../lib/catalog.js';
 import { QUESTIONS } from '../data/questions.js';
 import { SECTIONS } from '../data/syllabus.js';
 import { useStore } from '../lib/store.jsx';
-import { estPercentile } from '../lib/percentile.js';
+import { isScored, loadAnswerKeys, toKey } from '../lib/pyq.js';
+import { scoreQuestion, tally } from '../lib/scoring.js';
+import { AdminModeSwitch, useAdminMode } from '../lib/adminMode.jsx';
+import AnswerKeyEditor from '../components/AnswerKeyEditor.jsx';
+import RichText from '../components/RichText.jsx';
+import { loadServerPaper, submitServerAttempt } from '../lib/mockGenerator.js';
 
 const fmt = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
-export function scoreQuestion(q, ans) {
-  if (ans === undefined || ans === '' || ans === null) return { result: 'skip', marks: 0 };
-  const ok = q.type === 'mcq' ? ans === q.answer : String(ans).trim() === String(q.answer);
-  return { result: ok ? 'correct' : 'wrong', marks: ok ? 3 : q.type === 'mcq' ? -1 : 0 };
-}
+export { scoreQuestion };
 
 
 export default function TestPlayer() {
   const { mockId } = useParams();
+  return <MockGate mockId={mockId}>{(mock) => <Player key={mock.id} mock={mock} />}</MockGate>;
+}
+
+/** Waits for the mock (previous-year papers come from the API), then mounts the page with it. */
+function MockGate({ mockId, children }) {
+  const { customMocks } = useStore();
+  const { mock, loading, error } = useMock(mockId, customMocks);
+  if (!mock) {
+    return (
+      <div className="page"><div className="card">
+        {loading ? <div className="loading-card" role="status"><span className="ring" /><span>Loading the test…</span></div>
+          : <><h1>Test not found</h1>{error && <p className="muted">Couldn’t load the list of tests: {error.message}</p>}
+            <Link to="/mocks" className="btn" style={{ marginTop: 16 }}>Back to mock tests</Link></>}
+      </div></div>
+    );
+  }
+  return children(mock);
+}
+
+function Player({ mock }) {
   const nav = useNavigate();
-  const { addAttempt, customMocks } = useStore();
-  const mock = findMock(mockId, customMocks);
+  const { addAttempt } = useStore();
+  const { adminMode } = useAdminMode();
   const [params] = useSearchParams();
   // Scope chosen on the setup page: ?sections=VARC,QA&min=40 (defaults to the whole mock)
   const pickedParam = params.get('sections');
@@ -32,11 +54,38 @@ export default function TestPlayer() {
   const SEC_MIN = Number(params.get('min')) || mock?.sectionMinutes || SECTION_MINUTES;
   const partial = mock && sections.length < mock.sections.length;
   const title = mock ? (partial ? `${mock.title} · ${sections.join(' + ')}` : mock.title) : '';
+  const isPyq = mock?.kind === 'pyq';
+  // previous-year papers and generated mocks are served (without keys) and scored by the API
+  const isServer = mock?.source === 'server';
+  const [server, setServer] = useState({ questions: null, error: null });
+  useEffect(() => {
+    if (!isServer) return undefined;
+    let live = true;
+    loadServerPaper(mock.id).then((questions) => live && setServer({ questions, error: null }),
+      (error) => live && setServer({ questions: null, error }));
+    return () => { live = false; };
+  }, [isServer, mock?.id]);
+  const [submit, setSubmit] = useState({ busy: false, error: null, answers: null });
+  const ready = (!isServer || !!server.questions) && !submit.answers;
+
+  // Admin mode on a previous-year paper: the server sends this admin the current keys so they can be checked and changed
+  const [keys, setKeys] = useState(null); // { [questionId]: { answer, corrected } }
+  useEffect(() => {
+    if (!adminMode || !isPyq || keys) return undefined;
+    let live = true;
+    loadAnswerKeys(mock.id).then((k) => live && setKeys(k), () => {});
+    return () => { live = false; };
+  }, [adminMode, isPyq, mock?.id, keys]);
+  const served = useMemo(() => (server.questions && keys
+    ? server.questions.map((x) => (keys[x.id] ? { ...x, answer: toKey(x.type, keys[x.id].answer), scored: keys[x.id].answer != null, corrected: keys[x.id].corrected } : x))
+    : server.questions), [server.questions, keys]);
+  const onKeySaved = (id, answer) => setKeys((k) => ({ ...k, [id]: { answer, corrected: true } }));
 
   const bank = useMemo(() => Object.fromEntries(sections.map((s) => {
-    const pool = mock.questionIds ? mock.questionIds.map((id) => QUESTIONS.find((q) => q.id === id)).filter(Boolean) : QUESTIONS;
+    const pool = isServer ? served || []
+      : mock.questionIds ? mock.questionIds.map((id) => QUESTIONS.find((q) => q.id === id)).filter(Boolean) : QUESTIONS;
     return [s, pool.filter((q) => q.section === s)];
-  })), [mock, sections]);
+  })), [mock, sections, isServer, served]);
   const [secIdx, setSecIdx] = useState(0);
   const [qIdx, setQIdx] = useState(0);
   const [answers, setAnswers] = useState({});      // saved answers
@@ -59,31 +108,35 @@ export default function TestPlayer() {
   }, [q?.id]);
 
   useEffect(() => {
+    if (!ready) return undefined; // the clock starts once the paper has loaded
     const t = setInterval(() => {
       setLeft((l) => l - 1);
       timeUsed.current[secId] = (timeUsed.current[secId] || 0) + 1;
     }, 1000);
     return () => clearInterval(t);
-  }, [secId]);
+  }, [secId, ready]);
+
+  const finishOnServer = async (finalAnswers) => {
+    setSubmit({ busy: true, error: null, answers: finalAnswers });
+    try {
+      const scored = await submitServerAttempt(mock, sections, finalAnswers, timeUsed.current);
+      const id = `a-${Date.now()}`;
+      addAttempt({
+        id, mockId: mock.id, title, date: Date.now(), ...scored, answers: finalAnswers,
+        timeSpent: Object.values(timeUsed.current).reduce((a, b) => a + b, 0),
+      });
+      nav(`/mocks/result/${id}`, { replace: true });
+    } catch (e) {
+      setSubmit({ busy: false, error: e.message || 'Could not submit the test.', answers: finalAnswers });
+    }
+  };
 
   const finish = (finalAnswers) => {
-    const results = {};
-    let score = 0, max = 0;
-    sections.forEach((s) => {
-      const st = { correct: 0, wrong: 0, unattempted: 0, score: 0, time: timeUsed.current[s] || 0 };
-      bank[s].forEach((qq) => {
-        const r = scoreQuestion(qq, finalAnswers[qq.id]);
-        st.score += r.marks;
-        st[r.result === 'skip' ? 'unattempted' : r.result]++;
-      });
-      results[s] = st;
-      score += st.score;
-      max += bank[s].length * 3;
-    });
+    if (isServer) { finishOnServer(finalAnswers); return; }
+    const { sections: results, score, max, percentile } = tally(bank, finalAnswers, timeUsed.current, sections.length === 3);
     const id = `a-${Date.now()}`;
     addAttempt({
-      id, mockId: mock.id, title, date: Date.now(), score, max,
-      percentile: sections.length === 3 ? estPercentile(score / max) : undefined,
+      id, mockId: mock.id, title, date: Date.now(), score, max, percentile,
       sections: results, answers: finalAnswers, questionIds: sections.flatMap((s) => bank[s].map((qq) => qq.id)), timeSpent: Object.values(timeUsed.current).reduce((a, b) => a + b, 0),
     });
     nav(`/mocks/result/${id}`, { replace: true });
@@ -99,18 +152,33 @@ export default function TestPlayer() {
   };
 
   useEffect(() => {
-    if (left <= 0 && mock) nextSection();
+    if (left <= 0 && mock && ready) nextSection();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [left]);
 
-  if (!mock) return <div className="page"><h1>Test not found</h1></div>;
-  if (mock.kind === 'pyq') {
+  if (submit.answers) {
+    return (
+      <div className="page">
+        <div className="card">
+          <h1>{title}</h1>
+          {submit.error ? (
+            <>
+              <p className="muted">Your answers are safe in this tab, but they couldn’t be submitted: {submit.error}</p>
+              <button className="btn primary" disabled={submit.busy} onClick={() => finishOnServer(submit.answers)}>Try again</button>
+            </>
+          ) : <p className="muted" style={{ marginBottom: 0 }}>Scoring your test…</p>}
+        </div>
+      </div>
+    );
+  }
+  if (isServer && !server.questions) {
     return (
       <div className="page">
         <div className="card">
           <h1>{mock.title}</h1>
-          <p className="muted">This verified CAT paper is available as a PDF. It is not yet an interactive question set, so this page will not score or record an attempt.</p>
-          {mock.paperUrl && <a className="btn primary" href={mock.paperUrl} target="_blank" rel="noreferrer">Open official paper PDF</a>}
+          <p className="muted" style={{ marginBottom: 0 }}>
+            {server.error ? `This mock couldn’t be loaded: ${server.error.message}` : 'Loading your mock… The timer starts once it’s ready.'}
+          </p>
         </div>
       </div>
     );
@@ -157,6 +225,7 @@ export default function TestPlayer() {
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <span className="small faint">Time left</span>
           <span className={`timer ${left < 300 ? 'low' : ''}`}>{fmt(Math.max(0, left))}</span>
+          {isPyq && <AdminModeSwitch compact />}
           <button className="btn sm ghost" onClick={() => setConfirm('exit')}>Exit</button>
         </div>
       </div>
@@ -167,7 +236,7 @@ export default function TestPlayer() {
             {q.passage && (
               <div className="card passage">
                 <div className="small faint" style={{ marginBottom: 8, fontWeight: 600 }}>{q.section === 'VARC' ? 'Read the passage and answer the questions' : 'Read the set and answer the questions'}</div>
-                {q.passage}
+                <RichText text={q.passage} />
               </div>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -175,16 +244,23 @@ export default function TestPlayer() {
                 <h2>Question {qIdx + 1}</h2>
                 <div style={{ display: 'flex', gap: 6 }}>
                   <span className="chip">{q.type === 'mcq' ? 'MCQ' : 'TITA'}</span>
-                  <span className="chip good">+3</span>
-                  <span className="chip bad">{q.type === 'mcq' ? '−1' : '0'}</span>
+                  {isScored(q) ? (
+                    <>
+                      <span className="chip good">+3</span>
+                      <span className="chip bad">{q.type === 'mcq' ? '−1' : '0'}</span>
+                    </>
+                  ) : <span className="chip" title="No verified answer key is available for this question">Not scored</span>}
                 </div>
               </div>
-              <div className="q-text">{q.q}</div>
+              {q.figure && (
+                <p className="small faint" style={{ margin: 0 }}>This question refers to a chart, grid or figure in the original paper that isn’t reproduced here.</p>
+              )}
+              <RichText className="q-text" text={q.q} />
               {q.type === 'mcq' ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {q.options.map((o, i) => (
-                    <button key={i} className={`option ${draft === i ? 'selected' : ''}`} onClick={() => setDraft(i)}>
-                      <span className="key">{String.fromCharCode(65 + i)}</span><span>{o}</span>
+                    <button key={i} className={`option ${draft === i ? 'selected' : ''} ${adminMode && isPyq && q.answer === i ? 'correct' : ''}`} onClick={() => setDraft(i)}>
+                      <span className="key">{String.fromCharCode(65 + i)}</span><RichText as="span" text={o} />
                     </button>
                   ))}
                 </div>
@@ -193,6 +269,7 @@ export default function TestPlayer() {
                   <input className="input num" inputMode="numeric" value={draft ?? ''} onChange={(e) => setDraft(e.target.value.replace(/[^0-9.\-]/g, ''))} placeholder="Type your answer" />
                 </label>
               )}
+              {adminMode && isPyq && keys && <AnswerKeyEditor key={`${q.id}-${q.answer}`} q={q} onSaved={onKeySaved} />}
             </div>
           </div>
           <div className="player-actions">
@@ -219,7 +296,13 @@ export default function TestPlayer() {
               ))}
             </div>
           </div>
-          <p className="small faint" style={{ margin: 0 }}>Demo question set — a live deployment would load the full {mock.questions}-question paper from the API.</p>
+          <p className="small faint" style={{ margin: 0 }}>
+            {isPyq
+              ? `Official CAT ${mock.year} Slot ${mock.slot} paper · ${qs.length} ${secId} questions.`
+              : isServer
+                ? `AI-generated mock · ${qs.length} ${secId} questions · scored on submit.`
+                : `Practice question set · ${qs.length} ${secId} questions.`}
+          </p>
           <button className="btn primary" style={{ marginTop: 'auto' }} onClick={() => setConfirm('section')}>
             {secIdx < sections.length - 1 ? `Submit ${secId} & continue` : 'Submit test'}
           </button>

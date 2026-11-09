@@ -1,5 +1,6 @@
 package com.catalyst.attempt;
 
+import com.catalyst.answerkey.AnswerKeyCorrectionRepository;
 import com.catalyst.attempt.dto.AttemptDetail;
 import com.catalyst.attempt.dto.AttemptSummary;
 import com.catalyst.attempt.dto.SubmitAttemptRequest;
@@ -41,11 +42,13 @@ public class AttemptService {
     private final MarkingScheme marking;
     private final PercentileEstimator percentiles;
     private final ApplicationEventPublisher events;
+    private final AnswerKeyCorrectionRepository corrections;
     private final Clock clock;
 
     public AttemptService(AttemptRepository attempts, MockCatalogService catalog, QuestionSetResolver resolver,
                           QuestionRepository questions, Scorer scorer, AnswerChecker checker, MarkingScheme marking,
-                          PercentileEstimator percentiles, ApplicationEventPublisher events, Clock clock) {
+                          PercentileEstimator percentiles, ApplicationEventPublisher events,
+                          AnswerKeyCorrectionRepository corrections, Clock clock) {
         this.attempts = attempts;
         this.catalog = catalog;
         this.resolver = resolver;
@@ -55,6 +58,7 @@ public class AttemptService {
         this.marking = marking;
         this.percentiles = percentiles;
         this.events = events;
+        this.corrections = corrections;
         this.clock = clock;
     }
 
@@ -63,6 +67,11 @@ public class AttemptService {
     public AttemptDetail submit(UUID userId, String mockId, SubmitAttemptRequest req) {
         Mock mock = catalog.require(userId, mockId);
         Map<Section, List<Question>> paper = resolver.resolve(mock);
+        if (req.sections() != null && !req.sections().isEmpty()) {
+            paper.keySet().retainAll(req.sections());  // only the sections the learner chose to take
+            if (paper.isEmpty()) throw new com.catalyst.common.error.BadRequestException("None of those sections are in this mock.");
+        }
+        boolean fullLength = mock.isFullLength() && paper.size() == mock.getSections().size();
         List<String> ids = paper.values().stream().flatMap(List::stream).map(Question::getId).toList();
         Set<String> known = Set.copyOf(ids);
         Map<String, String> answers = new HashMap<>();
@@ -70,11 +79,11 @@ public class AttemptService {
         Map<Section, Integer> seconds = req.sectionSeconds() == null ? Map.of() : req.sectionSeconds();
 
         ScoreCard card = scorer.score(paper, answers, seconds);
-        Double percentile = mock.isFullLength() && card.maxScore() > 0
+        Double percentile = fullLength && card.maxScore() > 0
                 ? round1(percentiles.estimate((double) card.score() / card.maxScore())) : null;
         int timeSpent = seconds.values().stream().mapToInt(Integer::intValue).sum();
 
-        Attempt saved = attempts.save(new Attempt(userId, mock.getId(), mock.getTitle(), mock.isFullLength(), clock.instant(),
+        Attempt saved = attempts.save(new Attempt(userId, mock.getId(), mock.getTitle(), fullLength, clock.instant(),
                 card.score(), card.maxScore(), percentile, timeSpent, card.sections(), answers, ids));
         events.publishEvent(new StudySessionEvent(userId, Math.max(1, timeSpent / 60)));
         return detail(saved);
@@ -90,19 +99,43 @@ public class AttemptService {
         return attempts.findByUserIdOrderBySubmittedAtAsc(userId);
     }
 
-    @Transactional(readOnly = true)
+    /** The attempt with solutions. If an admin has corrected a key since it was taken, its totals are rescored first. */
+    @Transactional
     public AttemptDetail get(UUID userId, UUID attemptId) {
-        return detail(attempts.findByIdAndUserId(attemptId, userId).orElseThrow(() -> new NotFoundException("Attempt not found.")));
+        Attempt a = attempts.findByIdAndUserId(attemptId, userId).orElseThrow(() -> new NotFoundException("Attempt not found."));
+        Map<String, Question> byId = questions.findByIdIn(a.getQuestionIds()).stream()
+                .collect(Collectors.toMap(Question::getId, Function.identity()));
+        rescore(a, byId);
+        return detail(a, byId);
+    }
+
+    /** Scores the stored answers against the current keys and saves new totals if they changed. */
+    private void rescore(Attempt a, Map<String, Question> byId) {
+        Map<Section, List<Question>> paper = new java.util.LinkedHashMap<>();
+        a.getQuestionIds().stream().map(byId::get).filter(java.util.Objects::nonNull)
+                .forEach(q -> paper.computeIfAbsent(q.getSection(), s -> new java.util.ArrayList<>()).add(q));
+        Map<Section, Integer> seconds = new HashMap<>();
+        a.getSectionResults().forEach((s, r) -> seconds.put(s, r.timeSeconds()));
+        ScoreCard card = scorer.score(paper, a.getAnswers(), seconds);
+        if (card.score() == a.getScore() && card.maxScore() == a.getMaxScore() && card.sections().equals(a.getSectionResults())) return;
+        Double percentile = a.isFullLength() && card.maxScore() > 0 ? round1(percentiles.estimate((double) card.score() / card.maxScore())) : null;
+        a.rescored(card.score(), card.maxScore(), percentile, card.sections());
     }
 
     private AttemptDetail detail(Attempt a) {
         Map<String, Question> byId = questions.findByIdIn(a.getQuestionIds()).stream()
                 .collect(Collectors.toMap(Question::getId, Function.identity()));
+        return detail(a, byId);
+    }
+
+    private AttemptDetail detail(Attempt a, Map<String, Question> byId) {
+        Set<String> corrected = Set.copyOf(corrections.correctedQuestionIds(a.getMockId()));
         List<AttemptDetail.Solution> solutions = a.getQuestionIds().stream().map(byId::get).filter(java.util.Objects::nonNull).map(q -> {
             String response = a.getAnswers().get(q.getId());
             Outcome o = checker.check(q, response);
             return new AttemptDetail.Solution(q.getId(), q.getSection(), q.getTopic(), q.getType(), q.getPrompt(),
-                    q.getPassage(), q.getOptions(), q.getAnswer(), response, o, marking.marks(q.getType(), o), q.getExplanation());
+                    q.getPassage(), q.getOptions(), q.getAnswer(), response, o, marking.marks(q.getType(), o), q.getExplanation(),
+                    corrected.contains(q.getId()));
         }).toList();
         return new AttemptDetail(AttemptSummary.of(a), solutions);
     }

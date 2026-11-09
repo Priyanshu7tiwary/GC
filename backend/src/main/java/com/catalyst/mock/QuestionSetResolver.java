@@ -28,7 +28,7 @@ public class QuestionSetResolver {
                     .collect(Collectors.toMap(Question::getId, Function.identity()));
             list = mock.getQuestionIds().stream().map(byId::get).filter(java.util.Objects::nonNull).toList();
         } else {
-            list = questions.findBySectionInOrderByPositionAsc(mock.getSections());
+            list = questions.findBySectionInAndPaperIdIsNullOrderByPositionAsc(mock.getSections());
         }
         Map<Section, List<Question>> grouped = list.stream()
                 .collect(Collectors.groupingBy(Question::getSection, () -> new EnumMap<>(Section.class), Collectors.toList()));

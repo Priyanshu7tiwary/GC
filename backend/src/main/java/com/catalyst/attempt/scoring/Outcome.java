@@ -1,3 +1,4 @@
 package com.catalyst.attempt.scoring;
 
-public enum Outcome { CORRECT, WRONG, SKIPPED }
+/** UNSCORED: the question has no verified answer key, so it neither earns nor costs marks. */
+public enum Outcome { CORRECT, WRONG, SKIPPED, UNSCORED }

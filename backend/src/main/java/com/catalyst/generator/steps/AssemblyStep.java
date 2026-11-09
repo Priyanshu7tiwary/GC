@@ -35,9 +35,11 @@ class AssemblyStep implements GenerationStep {
         List<String> ids = ctx.questions().values().stream().flatMap(List::stream).map(Question::getId).toList();
         String title = req.type() == MockType.FULL ? "AI Full Mock"
                 : "AI " + ctx.sections().stream().map(Section::name).collect(Collectors.joining(" + ")) + " Sectional";
-        String subtitle = req.difficulty().label() + (req.focusWeakTopics() ? " · weak-area focus" : "");
+        long topicsCovered = ctx.questions().values().stream().flatMap(List::stream).map(Question::getTopicId)
+                .filter(java.util.Objects::nonNull).distinct().count();
+        String subtitle = req.difficulty().label() + (req.focusWeakTopics() ? " · weak-area focus" : "") + " · " + topicsCovered + " topics";
         int minutes = req.strictTiming() ? 40 : 60;
-        int questionCount = ctx.blueprint().values().stream().mapToInt(Integer::intValue).sum();
+        int questionCount = ids.size();
 
         Mock mock = Mock.custom("custom-" + java.util.UUID.randomUUID().toString().substring(0, 13), ctx.userId(), title, subtitle,
                 ctx.sections(), minutes, questionCount, req.difficulty().label(), ids, ctx.weakTopics(), clock.instant());

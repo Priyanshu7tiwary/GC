@@ -15,9 +15,11 @@ public class ProfileService {
     private final UserRepository users;
     private final ExamCalendar calendar;
     private final Clock clock;
+    private final AdminPolicy admins;
 
-    public ProfileService(UserRepository users, ExamCalendar calendar, Clock clock) {
+    public ProfileService(UserRepository users, ExamCalendar calendar, Clock clock, AdminPolicy admins) {
         this.users = users;
+        this.admins = admins;
         this.calendar = calendar;
         this.clock = clock;
     }
@@ -29,7 +31,8 @@ public class ProfileService {
 
     @Transactional(readOnly = true)
     public ProfileResponse get(UUID userId) {
-        return ProfileResponse.of(require(userId), LocalDate.now(clock));
+        User user = require(userId);
+        return ProfileResponse.of(user, LocalDate.now(clock), admins.isAdmin(user));
     }
 
     @Transactional
@@ -42,6 +45,6 @@ public class ProfileService {
         } else if (req.targetYear() != null) {
             user.scheduleExam(req.targetYear(), calendar.examDate(req.targetYear()));
         }
-        return ProfileResponse.of(user, LocalDate.now(clock));
+        return ProfileResponse.of(user, LocalDate.now(clock), admins.isAdmin(user));
     }
 }

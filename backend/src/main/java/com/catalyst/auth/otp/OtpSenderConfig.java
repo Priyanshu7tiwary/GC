@@ -10,7 +10,7 @@ import org.springframework.mail.javamail.JavaMailSender;
 class OtpSenderConfig {
     /** Email when Spring Boot configured a mail sender (SMTP_HOST set); otherwise the log-only fallback. */
     @Bean
-    OtpSender otpSender(ObjectProvider<JavaMailSender> mail, @Value("${app.mail.from:CATalyst <no-reply@catalyst.local>}") String from) {
+    OtpSender otpSender(ObjectProvider<JavaMailSender> mail, @Value("${app.mail.from:99ile <no-reply@99ile.local>}") String from) {
         JavaMailSender sender = mail.getIfAvailable();
         return sender != null ? new EmailOtpSender(sender, from) : new LoggingOtpSender();
     }

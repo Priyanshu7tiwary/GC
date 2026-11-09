@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useStore } from '../lib/store.jsx';
 import { MOCKS, PYQ_YEARS } from '../data/mocks.js';
+import { usePapers } from '../lib/catalog.js';
 import { SECTIONS } from '../data/syllabus.js';
-import { generateMock, WORKFLOW, SECTION_QS } from '../lib/mockGenerator.js';
+import { generateMock, WORKFLOW, SECTION_QS, listServerMocks, deleteServerMock } from '../lib/mockGenerator.js';
 import { IconClock, IconTest, IconArrow, IconCheck } from '../components/Icons.jsx';
 import MockScopePicker, { Check, scopeSections, scopeValid } from '../components/MockScopePicker.jsx';
 
@@ -43,13 +44,7 @@ function MockCard({ m, tries, onDelete }) {
         </div>
       ) : <div className="small muted">Not attempted yet.</div>}
       <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
-        {m.paperUrl ? (
-          <a href={m.paperUrl} target="_blank" rel="noreferrer" className="btn primary" style={{ flex: 1 }}>
-            <IconTest />Open official paper PDF
-          </a>
-        ) : (
-          <Link to={`/mocks/start/${m.id}`} className="btn primary" style={{ flex: 1 }}><IconTest />{tries ? 'Reattempt' : 'Start test'}</Link>
-        )}
+        <Link to={`/mocks/start/${m.id}`} className="btn primary" style={{ flex: 1 }}><IconTest />{tries ? 'Reattempt' : 'Start test'}</Link>
         {lastTry && <Link to={`/mocks/result/${lastTry.id}`} className="btn">Analysis</Link>}
         {onDelete && <button className="btn ghost" onClick={onDelete} title="Delete this mock">Delete</button>}
       </div>
@@ -60,12 +55,18 @@ function MockCard({ m, tries, onDelete }) {
 /* ---------------- previous years ---------------- */
 function PreviousYears({ byMock }) {
   const [year, setYear] = useState(PYQ_YEARS[0]);
-  const papers = MOCKS.filter((m) => m.kind === 'pyq' && m.year === year);
+  const { papers: all, error } = usePapers();
+  if (!all) {
+    return error
+      ? <div className="card"><p className="muted" style={{ margin: 0 }}>Couldn’t load the papers: {error.message}</p></div>
+      : <div className="loading-card" role="status"><span className="ring" /><span>Loading papers…</span></div>;
+  }
+  const papers = all.filter((m) => m.year === year);
   return (
     <>
       <div className="year-grid" style={{ marginBottom: 18 }}>
         {PYQ_YEARS.map((y) => {
-          const ps = MOCKS.filter((m) => m.kind === 'pyq' && m.year === y);
+          const ps = all.filter((m) => m.year === y);
           const done = ps.filter((p) => byMock[p.id]).length;
           return (
             <button key={y} className={`year-btn ${year === y ? 'active' : ''}`} onClick={() => setYear(y)}>
@@ -87,7 +88,7 @@ function PreviousYears({ byMock }) {
       ) : (
         <div className="card">
           <h2>CAT {year} official paper unavailable</h2>
-          <p className="muted" style={{ marginBottom: 0 }}>IIMs did not publicly release official CAT papers for 2011–2016. This archive includes verified official PDFs from 2017 onward; memory-based copies are not presented as official tests.</p>
+          <p className="muted" style={{ marginBottom: 0 }}>IIMs did not publicly release official CAT papers for 2011–2016. Official papers from 2017 onward are available as full tests; memory-based copies are not presented as official tests.</p>
         </div>
       )}
     </>
@@ -126,12 +127,17 @@ function Sectional({ byMock }) {
 const DIFFICULTIES = ['Easy', 'Moderate', 'Hard', 'CAT-level', 'Adaptive'];
 
 function CustomMocks({ byMock }) {
-  const { customMocks, addCustomMock, removeCustomMock, coverage } = useStore();
+  const { customMocks, addCustomMock, removeCustomMock, syncServerMocks, coverage } = useStore();
   const [scope, setScope] = useState({ type: null, subjects: [] });
   const [difficulty, setDifficulty] = useState('CAT-level');
   const [focusWeak, setFocusWeak] = useState(true);
   const [timed, setTimed] = useState(true);
-  const [run, setRun] = useState(null); // { steps: {id: 'running'|'done'}, info: {}, result }
+  const [run, setRun] = useState(null); // { steps: {id: 'running'|'done'|'failed'}, info: {}, result }
+  const [listError, setListError] = useState('');
+
+  useEffect(() => {
+    listServerMocks().then(syncServerMocks, () => setListError('Couldn’t refresh your generated mocks from the server.'));
+  }, [syncServerMocks]);
 
   const { type, subjects } = scope;
   const valid = scopeValid(scope);
@@ -140,21 +146,29 @@ function CustomMocks({ byMock }) {
   const qCount = secs.reduce((a, s) => a + SECTION_QS[s], 0);
 
   const start = async () => {
-    const state = { steps: {}, info: {} };
+    let state = { steps: {}, info: {} };
     setRun({ ...state });
     try {
-      const mock = await generateMock({ type, sections: subjects, difficulty, focusWeak, timed }, { coverage }, (id, info) => {
-        WORKFLOW.forEach((w) => { if (state.steps[w.id] === 'running' && w.id !== id) state.steps[w.id] = 'done'; });
-        state.steps[id] = 'running';
-        if (info) state.info[id] = info;
-        setRun({ ...state, steps: { ...state.steps }, info: { ...state.info } });
+      const mock = await generateMock({ type, sections: subjects, difficulty, focusWeak, timed }, { coverage }, (serverSteps) => {
+        const status = { PENDING: undefined, RUNNING: 'running', DONE: 'done', FAILED: 'failed' };
+        state = {
+          steps: Object.fromEntries(serverSteps.map((st) => [st.id, status[st.status]])),
+          info: Object.fromEntries(serverSteps.filter((st) => st.info).map((st) => [st.id, st.info])),
+        };
+        setRun({ ...state });
       });
-      WORKFLOW.forEach((w) => { state.steps[w.id] = 'done'; });
       addCustomMock(mock);
-      setRun({ ...state, steps: { ...state.steps }, result: mock });
+      setRun({ ...state, result: mock });
     } catch (e) {
       setRun({ ...state, error: e.message || 'Generation failed' });
     }
+  };
+
+  const remove = async (m) => {
+    if (m.source === 'server') {
+      try { await deleteServerMock(m.id); } catch (e) { if (e.status !== 404) { setListError(e.message); return; } }
+    }
+    removeCustomMock(m.id);
   };
 
   return (
@@ -165,7 +179,7 @@ function CustomMocks({ byMock }) {
 
           <div className="form-block">
             <div className="form-label">1 · Mock type</div>
-            <MockScopePicker value={scope} onChange={setScope} />
+            <MockScopePicker value={scope} onChange={setScope} counts={SECTION_QS} />
           </div>
 
           <div className="form-block">
@@ -223,10 +237,10 @@ function CustomMocks({ byMock }) {
         </div>
       </div>
 
-      <div className="card-head" style={{ marginBottom: 12 }}><div><h2>Your generated mocks</h2><p>{customMocks.length} saved</p></div></div>
+      <div className="card-head" style={{ marginBottom: 12 }}><div><h2>Your generated mocks</h2><p>{customMocks.length} saved{listError ? ` · ${listError}` : ''}</p></div></div>
       {customMocks.length ? (
         <div className="grid g-3">
-          {customMocks.map((m) => <MockCard key={m.id} m={m} tries={byMock[m.id]} onDelete={() => removeCustomMock(m.id)} />)}
+          {customMocks.map((m) => <MockCard key={m.id} m={m} tries={byMock[m.id]} onDelete={() => remove(m)} />)}
         </div>
       ) : <div className="card muted">No custom mocks yet — generate your first one above.</div>}
     </>
@@ -247,7 +261,7 @@ export default function MockTests() {
       <div className="page-head">
         <div>
           <h1>Mock Tests</h1>
-          <p>Timed practice player for practice mocks. Verified CAT previous-year papers open as source PDFs.</p>
+          <p>Timed, section-locked tests. Previous-year mocks are the official CAT 2017–2025 papers, scored with CAT marking.</p>
         </div>
       </div>
 

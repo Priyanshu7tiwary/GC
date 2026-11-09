@@ -6,4 +6,6 @@ import java.util.List;
 
 public interface TopicRepository extends JpaRepository<Topic, String> {
     List<Topic> findAllByOrderByPositionAsc();
+
+    java.util.Optional<Topic> findBySectionAndNameIgnoreCase(com.catalyst.common.domain.Section section, String name);
 }

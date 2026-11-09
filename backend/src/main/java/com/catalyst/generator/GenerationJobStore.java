@@ -23,9 +23,21 @@ class GenerationJobStore {
         return jobs.save(job);
     }
 
+    /** A job that has not progressed for this long is treated as dead and no longer blocks the user. */
+    static final java.time.Duration STALE_AFTER = java.time.Duration.ofMinutes(15);
+
     @Transactional(readOnly = true)
     boolean hasActiveJob(UUID userId) {
-        return jobs.existsByUserIdAndStatusIn(userId, java.util.List.of(JobStatus.QUEUED, JobStatus.RUNNING));
+        return jobs.existsByUserIdAndStatusInAndUpdatedAtAfter(userId, java.util.List.of(JobStatus.QUEUED, JobStatus.RUNNING),
+                clock.instant().minus(STALE_AFTER));
+    }
+
+    /** Jobs left queued or running by a previous server process can never finish; mark them failed. */
+    @Transactional
+    int failInterrupted() {
+        var stuck = jobs.findByStatusIn(java.util.List.of(JobStatus.QUEUED, JobStatus.RUNNING));
+        stuck.forEach(j -> j.failed(j.runningStep(), "Interrupted by a server restart. Please generate the mock again.", clock.instant()));
+        return stuck.size();
     }
 
     @Transactional(readOnly = true)

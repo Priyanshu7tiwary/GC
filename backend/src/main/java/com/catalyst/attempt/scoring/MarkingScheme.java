@@ -12,7 +12,7 @@ public interface MarkingScheme {
         return switch (outcome) {
             case CORRECT -> correct(type);
             case WRONG -> wrong(type);
-            case SKIPPED -> 0;
+            case SKIPPED, UNSCORED -> 0;
         };
     }
 }
